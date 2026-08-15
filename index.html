@@ -3470,73 +3470,118 @@
         }
 
         let uploadAbortController = null;
-        function prosesAntreanBackground() {
-            if (!navigator.onLine) return;
-            let antrian = [];
-            try { antrian = JSON.parse(localStorage.getItem('antrian_pakan')) || []; }
-            catch (e) { console.log("Antrean korup"); localStorage.removeItem('antrian_pakan'); }
-            if (isProsesUploadPWA || antrian.length === 0) return;
+function prosesAntreanBackground() {
+    if (!navigator.onLine) return;
+    let antrian = [];
+    try { antrian = JSON.parse(localStorage.getItem('antrian_pakan')) || []; }
+    catch (e) { console.log("Antrean korup"); localStorage.removeItem('antrian_pakan'); }
+    if (isProsesUploadPWA || antrian.length === 0) return;
 
-            isProsesUploadPWA = true;
+    isProsesUploadPWA = true;
 
-            // --- LOGIKA AUTO-BATCH CERDAS ---
-            let dt = antrian[0];
-            let itemsToShift = 1;
+    // --- LOGIKA AUTO-BATCH CERDAS ---
+    let dt = antrian[0];
+    let itemsToShift = 1;
 
-            // Jika item pertama bukan Keranjang (isBatch), gabungkan dengan laporan tunggal lainnya!
-            if (!dt.isBatch) {
-                let bundledItems = [dt];
-                // Tarik maksimal 15 laporan tunggal secara beruntun dari antrean
-                for (let i = 1; i < antrian.length && bundledItems.length < 15; i++) {
-                    if (!antrian[i].isBatch) {
-                        bundledItems.push(antrian[i]);
-                        itemsToShift++;
-                    } else {
-                        break; // Stop jika menabrak Keranjang di tengah jalan
-                    }
-                }
-                // Jika ada lebih dari 1 laporan, sulap menjadi format BATCH!
-                if (bundledItems.length > 1) {
-                    dt = { isBatch: true, items: bundledItems };
-                }
+    if (!dt.isBatch) {
+        let bundledItems = [dt];
+        for (let i = 1; i < antrian.length && bundledItems.length < 15; i++) {
+            if (!antrian[i].isBatch) {
+                bundledItems.push(antrian[i]);
+                itemsToShift++;
+            } else {
+                break;
             }
-            // ---------------------------------
-
-            let badge = document.getElementById('koneksi-badge');
-            badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">cloud_sync</span> Mengirim Data... (${antrian.length} antre)`;
-            badge.classList.remove('offline-badge'); badge.style.background = "#FEA405";
-
-            // Gunakan AbortController untuk membatalkan fetch yang menggantung (hanging)
-            if (uploadAbortController) uploadAbortController.abort();
-            uploadAbortController = new AbortController();
-            let timeoutId = setTimeout(() => uploadAbortController.abort(), 45000); // 45 detik timeout agar sabar menunggu Auto-Batch
-
-            fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({ source: 'pwa_cbl', payload: dt }),
-                signal: uploadAbortController.signal
-            })
-                .then(r => r.json())
-                .then(res => {
-                    clearTimeout(timeoutId);
-                    if (res.status === 'error') {
-                        alert("⚠️ BACKGROUND SYNC GAGAL: " + res.message + "\n\nData masih tertahan di antrean.");
-                    } else {
-                        // JIKA BERHASIL TERHUBUNG KE SERVER, HAPUS DARI ANTREAN SESUAI JUMLAH YANG TERKIRIM
-                        let currentAntrian = JSON.parse(localStorage.getItem('antrian_pakan')) || [];
-                        currentAntrian.splice(0, itemsToShift);
-                        localStorage.setItem('antrian_pakan', JSON.stringify(currentAntrian));
-                    }
-                })
-                .catch(e => {
-                    clearTimeout(timeoutId);
-                    console.log("Jaringan terputus saat background sync, akan dicoba otomatis nanti", e);
-                })
-                .finally(() => {
-                    isProsesUploadPWA = false;
-                    setTimeout(prosesAntreanBackground, 1000);
-                });
         }
+        if (bundledItems.length > 1) {
+            dt = { isBatch: true, items: bundledItems };
+        }
+    }
+    // ---------------------------------
+
+    let badge = document.getElementById('koneksi-badge');
+    badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">cloud_sync</span> Mengirim ke Supabase... (${antrian.length} antre)`;
+    badge.classList.remove('offline-badge'); badge.style.background = "#FEA405";
+
+    if (uploadAbortController) uploadAbortController.abort();
+    uploadAbortController = new AbortController();
+    let timeoutId = setTimeout(() => uploadAbortController.abort(), 45000);
+
+    // ==========================================
+    // 🪄 MAPPING DATA UNTUK SUPABASE
+    // Mengurai pesanan agar 1 pakan = 1 baris
+    // ==========================================
+    let payloadsToProcess = dt.isBatch ? dt.items : [dt];
+    let supabaseRows = [];
+
+    payloadsToProcess.forEach(pl => {
+        // Konversi path lokasi PWA ke nama Cabang
+        let mapLoc = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'Kandang PM', '/spn_kandang': 'Kandang SPN' };
+        let cabangStr = mapLoc[pl.lokasi] || 'PM';
+
+        // Uraikan setiap jenis pakan yang dipilih
+        for (let pakanName in pl.items) {
+            let itemQty = pl.items[pakanName];
+            let detail = pl.detail_items ? pl.detail_items[pakanName] : null;
+            let harga = detail ? (detail.harga || 0) : 0;
+            let satuan = detail ? (detail.satuan || 'Kg') : 'Kg';
+
+            // Amankan data "Ekor" atau "Ongkir" dengan memasukkannya ke catatan
+            let extraCatatan = pl.catatan || "";
+            if (pl.ekor > 0) extraCatatan += ` (Ekor: ${pl.ekor})`;
+            if (pl.ongkir) extraCatatan += ` (Ongkir/Sup: ${pl.ongkir})`;
+
+            supabaseRows.push({
+                tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
+                petugas: pl.petugas || 'Admin',
+                cabang: cabangStr,
+                status: pl.status || 'Keluar',
+                relasi: pl.relasi || '-',
+                pakan: pakanName,
+                qty: itemQty,
+                satuan: satuan,
+                harga_satuan: harga,
+                catatan: extraCatatan.trim(),
+                hash_str: pl.hashStr || ''
+            });
+        }
+    });
+    // ==========================================
+
+    // 🚀 TEMBAK KE API SUPABASE (BYPASS GOOGLE SCRIPT)
+    fetch(`${SUPA_URL}/rest/v1/transaksi_pakan`, {
+        method: 'POST',
+        headers: {
+            'apikey': SUPA_ANON_KEY,
+            'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal' // Agar server membalas dengan cepat
+        },
+        body: JSON.stringify(supabaseRows),
+        signal: uploadAbortController.signal
+    })
+    .then(async (response) => {
+        clearTimeout(timeoutId);
+        if (response.ok) {
+            // JIKA BERHASIL TERHUBUNG KE SERVER, HAPUS DARI ANTREAN
+            let currentAntrian = JSON.parse(localStorage.getItem('antrian_pakan')) || [];
+            currentAntrian.splice(0, itemsToShift);
+            localStorage.setItem('antrian_pakan', JSON.stringify(currentAntrian));
+        } else {
+            const err = await response.json();
+            console.error("Gagal insert Supabase:", err);
+            throw new Error(err.message); // Lempar error agar dicoba lagi
+        }
+    })
+    .catch(e => {
+        clearTimeout(timeoutId);
+        console.log("Jaringan terputus atau gagal sync, dicoba otomatis nanti", e);
+    })
+    .finally(() => {
+        isProsesUploadPWA = false;
+        setTimeout(prosesAntreanBackground, 1000);
+    });
+}
 
         function sinkronisasiAntrianLokal() {
             // Paksa reset lock jika antrean dipanggil ulang (misal dari resume)
