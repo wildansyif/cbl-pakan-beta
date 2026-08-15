@@ -1458,7 +1458,13 @@
 
             <div id="koneksi-badge"></div>
 
-            <div class="form-group" style="margin-top: 15px;">
+    <!-- TOMBOL TEST SUPABASE -->
+    <button type="button" onclick="testKirimSupabase()" style="width:100%; background-color:#1e3a8a; color:white; padding:10px; border-radius:8px; border:none; font-weight:bold; margin-bottom:15px; cursor:pointer;">
+        🧪 TEST KIRIM KE SUPABASE
+    </button>
+    <!-- ==================== -->
+
+    <div class="form-group" style="margin-top: 15px;">
                 <div class="mode-toggle">
                     <input type="radio" id="mode_pakan" name="mode_input" value="pakan" checked
                         onchange="toggleModeInput()">
@@ -2994,6 +3000,41 @@
 
         const API_URL = "https://script.google.com/macros/s/AKfycbxU6Ga-ef5nkTzUY_dhIFGepd2rxNmlgsmp-o1AmmtLxmCGKupac2duthRekpOSkQYT/exec";
         const NOMOR_WA_ADMIN = "6282143601114";
+        const SUPA_URL = 'https://hwpbkdmaeqovhxttkrmj.supabase.co';
+        const SUPA_ANON_KEY = 'sb_publishable_JAhHcT-Z-SZfLa3p9m3qvQ_WFAOew5A';
+
+        async function testKirimSupabase() {
+        const payloadData = {
+        cabang: "PM",
+        status: "Keluar",
+        relasi: "Uji Coba Peternak",
+        pakan: "Mako S-20",
+        qty: 50
+    };
+
+    try {
+        const response = await fetch(`${SUPA_URL}/rest/v1/transaksi`, {
+            method: 'POST',
+            headers: {
+                'apikey': SUPA_ANON_KEY,
+                'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify(payloadData)
+        });
+
+        if (response.ok) {
+            alert("✅ Berhasil! Data sukses masuk ke Brankas Supabase.");
+        } else {
+            const err = await response.json();
+            alert("❌ Gagal: " + err.message);
+        }
+    } catch (error) {
+        alert("❌ Error Jaringan: " + error.message);
+    }
+}
+// ----------------------------------------------
         const USERS = { "1234": "Admin Pusat (Wildan)", "5678": "Petugas Lapangan", "0000": "Pak Agus", "8888": "Petugas SPN (Zulfi)" };
         const KATG_MASUK = ["Bayar Pakan", "Bayar Tunai", "Dll"];
         const KATG_KELUAR = ["Bongkar Muat", "OPR Ekspedisi Pakan", "Perawatan Kendaraan", "OPR Kandang", "Tarik Deposit", "Kasbon", "Lainnya"];
