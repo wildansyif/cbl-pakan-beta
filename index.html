@@ -3581,7 +3581,6 @@ function prosesAntreanBackground() {
             throw new Error(err.message); // Lempar error agar dicoba lagi
         }
     })
-    })
     .catch(e => {
         clearTimeout(timeoutId);
         console.log("Jaringan terputus atau gagal sync, dicoba otomatis nanti", e);
