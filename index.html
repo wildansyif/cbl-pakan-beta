@@ -3470,7 +3470,7 @@
         }
 
         let uploadAbortController = null;
-function prosesAntreanBackground() {
+async function prosesAntreanBackground() {
     if (!navigator.onLine) return;
     let antrian = [];
     try { antrian = JSON.parse(localStorage.getItem('antrian_pakan')) || []; }
@@ -3479,7 +3479,6 @@ function prosesAntreanBackground() {
 
     isProsesUploadPWA = true;
 
-    // --- LOGIKA AUTO-BATCH CERDAS ---
     let dt = antrian[0];
     let itemsToShift = 1;
 
@@ -3489,15 +3488,10 @@ function prosesAntreanBackground() {
             if (!antrian[i].isBatch) {
                 bundledItems.push(antrian[i]);
                 itemsToShift++;
-            } else {
-                break;
-            }
+            } else { break; }
         }
-        if (bundledItems.length > 1) {
-            dt = { isBatch: true, items: bundledItems };
-        }
+        if (bundledItems.length > 1) { dt = { isBatch: true, items: bundledItems }; }
     }
-    // ---------------------------------
 
     let badge = document.getElementById('koneksi-badge');
     badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">cloud_sync</span> Mengirim ke Supabase... (${antrian.length} antre)`;
@@ -3505,113 +3499,162 @@ function prosesAntreanBackground() {
 
     if (uploadAbortController) uploadAbortController.abort();
     uploadAbortController = new AbortController();
-    let timeoutId = setTimeout(() => uploadAbortController.abort(), 45000);
+    let timeoutId = setTimeout(() => uploadAbortController.abort(), 60000); // Waktu di-extend ke 60 detik karena upload foto
 
-    // ==========================================
-    // 🪄 MAPPING DATA UNTUK SUPABASE
-    // Mengurai pesanan agar 1 pakan = 1 baris
-    // ==========================================
     let payloadsToProcess = dt.isBatch ? dt.items : [dt];
     let supabaseRows = [];
+    let cashflowRows = [];
 
-    payloadsToProcess.forEach(pl => {
-        // Konversi path lokasi PWA ke nama Cabang
-        let mapLoc = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'Kandang PM', '/spn_kandang': 'Kandang SPN' };
-        let cabangStr = mapLoc[pl.lokasi] || 'PM';
+    try {
+        for (let pl of payloadsToProcess) {
+            let mapLoc = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'Kandang PM', '/spn_kandang': 'Kandang SPN' };
+            let cabangStr = mapLoc[pl.lokasi] || 'PM';
 
-        // 1. URAIKAN SETIAP JENIS PAKAN
-        for (let pakanName in pl.items) {
-            let itemQty = pl.items[pakanName];
-            let detail = pl.detail_items ? pl.detail_items[pakanName] : null;
-            
-            // Jika barang keluar, pakai harga jual. Jika barang masuk, set HPP ke 0 dulu
-            let harga_jual_sistem = detail ? (detail.harga || 0) : 0;
-            let harga = (pl.status === "Keluar") ? harga_jual_sistem : 0;
-            let satuan = detail ? (detail.satuan || 'Kg') : 'Kg';
-
-            // Masukkan info Ekor / Supplier ke catatan
-            let extraCatatan = pl.catatan || "";
-            if (pl.ekor > 0) extraCatatan += ` (Ekor: ${pl.ekor})`;
-            if (pl.status === "Masuk" && pl.ongkir) extraCatatan += ` (Supplier: ${pl.ongkir})`;
-
-            supabaseRows.push({
-                tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
-                waktu_input: new Date().toISOString(), // Jam aktual HP saat offline/online
-                petugas: pl.petugas || 'Admin',
-                cabang: cabangStr,
-                status: pl.status || 'Keluar',
-                relasi: pl.relasi || '-',
-                pakan: pakanName,
-                qty: itemQty,
-                satuan: satuan,
-                harga_satuan: harga,
-                catatan: extraCatatan.trim(),
-                hash_str: pl.hashStr || ''
-            });
-        }
-
-        // 2. JIKA ADA ONGKIR (KHUSUS BARANG KELUAR), JADIKAN BARIS ITEM TERSENDIRI
-        let ongkirVal = parseFloat(String(pl.ongkir || "0").replace(/[^0-9]/g, ''));
-        if (ongkirVal > 0 && pl.status === "Keluar") {
-            supabaseRows.push({
-                tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
-                waktu_input: new Date().toISOString(),
-                petugas: pl.petugas || 'Admin',
-                cabang: cabangStr,
-                status: pl.status || 'Keluar',
-                relasi: pl.relasi || '-',
-                pakan: 'Ongkir Pengiriman',  // <--- Ongkir dianggap sebagai barang
-                qty: 1,
-                satuan: 'Rit',
-                harga_satuan: ongkirVal,
-                catatan: 'Biaya Pengiriman',
-                hash_str: (pl.hashStr || '') + '_ONGKIR' // Hash dibedakan agar tidak bentrok
-            });
-        }
-    });
-    // ==========================================
-
-    // 🚀 TEMBAK KE API SUPABASE
-    fetch(`${SUPA_URL}/rest/v1/transaksi_pakan`, {
-        method: 'POST',
-        headers: {
-            'apikey': SUPA_ANON_KEY,
-            'Authorization': `Bearer ${SUPA_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal' // Agar server membalas dengan cepat
-        },
-        body: JSON.stringify(supabaseRows),
-        signal: uploadAbortController.signal
-    })
-    .then(async (response) => {
-        clearTimeout(timeoutId);
-        if (response.ok) {
-            // JIKA BERHASIL TERHUBUNG KE SERVER, HAPUS DARI ANTREAN LOKAL
-            let currentAntrian = JSON.parse(localStorage.getItem('antrian_pakan')) || [];
-            currentAntrian.splice(0, itemsToShift);
-            localStorage.setItem('antrian_pakan', JSON.stringify(currentAntrian));
-
-            // 👉 KEMBALIKAN WARNA BADGE KE HIJAU JIKA ANTREAN HABIS
-            if (currentAntrian.length === 0) {
-                let badge = document.getElementById('koneksi-badge');
-                badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">wifi</span> ONLINE: Sinkronisasi Aktif`;
-                badge.style.background = "#8AA624";
-                badge.classList.remove('offline-badge');
+            // ===============================================
+            // 1. OTOMATIS UPLOAD SURAT JALAN JIKA ADA
+            // ===============================================
+            let urlSJ = "-";
+            if (pl.status === "Masuk" && pl.fileSJ && pl.fileSJ.base64) {
+                badge.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:16px; vertical-align:middle;">sync</span> Upload Surat Jalan...`;
+                let namaFile = `SJ_${cabangStr}_${Date.now()}_${Math.floor(Math.random()*100)}.jpg`;
+                try {
+                    urlSJ = await uploadGambarKeSupabase(pl.fileSJ.base64, pl.fileSJ.mime, 'surat_jalan', namaFile);
+                } catch (err) {
+                    console.error("Gagal upload SJ", err);
+                    urlSJ = "Gagal Upload SJ";
+                }
+                badge.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:16px; vertical-align:middle;">sync</span> Menyimpan Data...`;
             }
-        } else {
-            const err = await response.json();
-            console.error("Gagal insert Supabase:", err);
-            throw new Error(err.message); // Lempar error agar dicoba lagi
+
+            let totalKgBongkar = 0;
+
+            // ===============================================
+            // 2. URAIKAN DATA PAKAN
+            // ===============================================
+            for (let pakanName in pl.items) {
+                let itemQty = pl.items[pakanName];
+                let detail = pl.detail_items ? pl.detail_items[pakanName] : null;
+                
+                let harga_jual_sistem = detail ? (detail.harga || 0) : 0;
+                let harga = (pl.status === "Keluar") ? harga_jual_sistem : 0;
+                let satuan = detail ? (detail.satuan || 'Kg') : 'Kg';
+
+                totalKgBongkar += parseFloat(itemQty) || 0;
+
+                let extraCatatan = pl.catatan || "";
+                if (pl.ekor > 0) extraCatatan += ` (Ekor: ${pl.ekor})`;
+                if (pl.status === "Masuk" && pl.ongkir) extraCatatan += ` (Supplier: ${pl.ongkir})`;
+                if (urlSJ !== "-") extraCatatan += `\nLink SJ: ${urlSJ}`; // Tempelkan URL SJ ke catatan
+
+                supabaseRows.push({
+                    tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
+                    waktu_input: new Date().toISOString(),
+                    petugas: pl.petugas || 'Admin',
+                    cabang: cabangStr,
+                    status: pl.status || 'Keluar',
+                    relasi: pl.relasi || '-',
+                    pakan: pakanName,
+                    qty: itemQty,
+                    satuan: satuan,
+                    harga_satuan: harga,
+                    catatan: extraCatatan.trim(),
+                    hash_str: pl.hashStr + '_' + pakanName
+                });
+            }
+
+            // ===============================================
+            // 3. JIKA ADA ONGKIR (KHUSUS KELUAR)
+            // ===============================================
+            let ongkirVal = parseFloat(String(pl.ongkir || "0").replace(/[^0-9]/g, ''));
+            if (ongkirVal > 0 && pl.status === "Keluar") {
+                supabaseRows.push({
+                    tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
+                    waktu_input: new Date().toISOString(),
+                    petugas: pl.petugas || 'Admin',
+                    cabang: cabangStr,
+                    status: pl.status || 'Keluar',
+                    relasi: pl.relasi || '-',
+                    pakan: 'Ongkir Pengiriman',
+                    qty: 1,
+                    satuan: 'Rit',
+                    harga_satuan: ongkirVal,
+                    catatan: 'Biaya Pengiriman',
+                    hash_str: (pl.hashStr || '') + '_ONGKIR'
+                });
+            }
+
+            // ===============================================
+            // 4. JIKA ADA CENTANG BONGKAR MUAT (CASH OUT)
+            // ===============================================
+            if (pl.uangBongkar) {
+                let biayaBongkar = totalKgBongkar * 30; // Rp 30 / kg
+                cashflowRows.push({
+                    tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
+                    jenis: "Keluar",
+                    metode: "Cash",
+                    kategori: "Bongkar Muat",
+                    relasi: "Kuli Gudang " + cabangStr,
+                    nominal: biayaBongkar,
+                    diskon: 0,
+                    keterangan: `Upah bongkar pakan masuk (${totalKgBongkar} Kg)`,
+                    bukti_url: urlSJ, // Jadikan SJ sebagai bukti bayar kuli juga
+                    petugas: pl.petugas || 'Admin'
+                });
+            }
         }
-    })
-    .catch(e => {
+
+        // 🚀 TEMBAK KE TABEL PAKAN
+        let resPakan = await fetch(`${SUPA_URL}/rest/v1/transaksi_pakan`, {
+            method: 'POST',
+            headers: {
+                'apikey': SUPA_ANON_KEY,
+                'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify(supabaseRows),
+            signal: uploadAbortController.signal
+        });
+
+        if (!resPakan.ok) {
+            const err = await resPakan.json();
+            throw new Error("Pakan Error: " + err.message);
+        }
+
+        // 🚀 TEMBAK KE TABEL CASHFLOW (BONGKAR MUAT)
+        if (cashflowRows.length > 0) {
+            let resCF = await fetch(`${SUPA_URL}/rest/v1/cashflow`, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPA_ANON_KEY,
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify(cashflowRows)
+            });
+            if (!resCF.ok) console.error("Gagal insert cashflow bongkar muat");
+        }
+
+        // BERHASIL! HAPUS DARI ANTREAN
         clearTimeout(timeoutId);
-        console.log("Jaringan terputus atau gagal sync, dicoba otomatis nanti", e);
-    })
-    .finally(() => {
+        let currentAntrian = JSON.parse(localStorage.getItem('antrian_pakan')) || [];
+        currentAntrian.splice(0, itemsToShift);
+        localStorage.setItem('antrian_pakan', JSON.stringify(currentAntrian));
+
+        if (currentAntrian.length === 0) {
+            badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">wifi</span> ONLINE: Sinkronisasi Aktif`;
+            badge.style.background = "#8AA624";
+            badge.classList.remove('offline-badge');
+        }
+
+    } catch (e) {
+        clearTimeout(timeoutId);
+        console.log("Jaringan terputus atau gagal sync:", e);
+    } finally {
         isProsesUploadPWA = false;
         setTimeout(prosesAntreanBackground, 1000);
-    });
+    }
 }
 
         function sinkronisasiAntrianLokal() {
