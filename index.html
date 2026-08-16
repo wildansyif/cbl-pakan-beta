@@ -3520,6 +3520,58 @@ function prosesAntreanBackground() {
         let cabangStr = mapLoc[pl.lokasi] || 'PM';
 
         // Uraikan setiap jenis pakan yang dipilih
+        payloadsToProcess.forEach(pl => {
+        // Konversi path lokasi PWA ke nama Cabang
+        let mapLoc = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'Kandang PM', '/spn_kandang': 'Kandang SPN' };
+        let cabangStr = mapLoc[pl.lokasi] || 'PM';
+
+        // 1. URAIKAN SETIAP JENIS PAKAN
+        for (let pakanName in pl.items) {
+            let itemQty = pl.items[pakanName];
+            let detail = pl.detail_items ? pl.detail_items[pakanName] : null;
+            let harga = detail ? (detail.harga || 0) : 0;
+            let satuan = detail ? (detail.satuan || 'Kg') : 'Kg';
+
+            // Masukkan info Ekor / Supplier ke catatan
+            let extraCatatan = pl.catatan || "";
+            if (pl.ekor > 0) extraCatatan += ` (Ekor: ${pl.ekor})`;
+            if (pl.status === "Masuk" && pl.ongkir) extraCatatan += ` (Supplier: ${pl.ongkir})`;
+
+            supabaseRows.push({
+                tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
+                waktu_input: new Date().toISOString(), // Jam aktual HP saat offline/online
+                petugas: pl.petugas || 'Admin',
+                cabang: cabangStr,
+                status: pl.status || 'Keluar',
+                relasi: pl.relasi || '-',
+                pakan: pakanName,
+                qty: itemQty,
+                satuan: satuan,
+                harga_satuan: harga,
+                catatan: extraCatatan.trim(),
+                hash_str: pl.hashStr || ''
+            });
+        }
+
+        // 2. JIKA ADA ONGKIR (KHUSUS BARANG KELUAR), JADIKAN BARIS ITEM TERSENDIRI
+        let ongkirVal = parseFloat(String(pl.ongkir || "0").replace(/[^0-9]/g, ''));
+        if (ongkirVal > 0 && pl.status === "Keluar") {
+            supabaseRows.push({
+                tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
+                waktu_input: new Date().toISOString(),
+                petugas: pl.petugas || 'Admin',
+                cabang: cabangStr,
+                status: pl.status || 'Keluar',
+                relasi: pl.relasi || '-',
+                pakan: 'Ongkir Pengiriman',  // <--- Ongkir dianggap sebagai barang
+                qty: 1,
+                satuan: 'Rit',
+                harga_satuan: ongkirVal,
+                catatan: 'Biaya Pengiriman',
+                hash_str: (pl.hashStr || '') + '_ONGKIR' // Hash dibedakan agar tidak bentrok
+            });
+        }
+    });
         for (let pakanName in pl.items) {
             let itemQty = pl.items[pakanName];
             let detail = pl.detail_items ? pl.detail_items[pakanName] : null;
