@@ -3519,16 +3519,12 @@ function prosesAntreanBackground() {
         let mapLoc = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'Kandang PM', '/spn_kandang': 'Kandang SPN' };
         let cabangStr = mapLoc[pl.lokasi] || 'PM';
 
-        // Uraikan setiap jenis pakan yang dipilih
-        payloadsToProcess.forEach(pl => {
-        // Konversi path lokasi PWA ke nama Cabang
-        let mapLoc = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'Kandang PM', '/spn_kandang': 'Kandang SPN' };
-        let cabangStr = mapLoc[pl.lokasi] || 'PM';
-
         // 1. URAIKAN SETIAP JENIS PAKAN
         for (let pakanName in pl.items) {
             let itemQty = pl.items[pakanName];
             let detail = pl.detail_items ? pl.detail_items[pakanName] : null;
+            
+            // Jika barang keluar, pakai harga jual. Jika barang masuk, set HPP ke 0 dulu
             let harga_jual_sistem = detail ? (detail.harga || 0) : 0;
             let harga = (pl.status === "Keluar") ? harga_jual_sistem : 0;
             let satuan = detail ? (detail.satuan || 'Kg') : 'Kg';
@@ -3573,35 +3569,9 @@ function prosesAntreanBackground() {
             });
         }
     });
-        for (let pakanName in pl.items) {
-            let itemQty = pl.items[pakanName];
-            let detail = pl.detail_items ? pl.detail_items[pakanName] : null;
-            let harga = detail ? (detail.harga || 0) : 0;
-            let satuan = detail ? (detail.satuan || 'Kg') : 'Kg';
-
-            // Amankan data "Ekor" atau "Ongkir" dengan memasukkannya ke catatan
-            let extraCatatan = pl.catatan || "";
-            if (pl.ekor > 0) extraCatatan += ` (Ekor: ${pl.ekor})`;
-            if (pl.ongkir) extraCatatan += ` (Ongkir/Sup: ${pl.ongkir})`;
-
-            supabaseRows.push({
-                tanggal: pl.tanggal || new Date().toISOString().split('T')[0],
-                petugas: pl.petugas || 'Admin',
-                cabang: cabangStr,
-                status: pl.status || 'Keluar',
-                relasi: pl.relasi || '-',
-                pakan: pakanName,
-                qty: itemQty,
-                satuan: satuan,
-                harga_satuan: harga,
-                catatan: extraCatatan.trim(),
-                hash_str: pl.hashStr || ''
-            });
-        }
-    });
     // ==========================================
 
-    // 🚀 TEMBAK KE API SUPABASE (BYPASS GOOGLE SCRIPT)
+    // 🚀 TEMBAK KE API SUPABASE
     fetch(`${SUPA_URL}/rest/v1/transaksi_pakan`, {
         method: 'POST',
         headers: {
@@ -3621,7 +3591,7 @@ function prosesAntreanBackground() {
             currentAntrian.splice(0, itemsToShift);
             localStorage.setItem('antrian_pakan', JSON.stringify(currentAntrian));
 
-            // 👉 FIX: KEMBALIKAN WARNA BADGE KE HIJAU JIKA ANTREAN HABIS
+            // 👉 KEMBALIKAN WARNA BADGE KE HIJAU JIKA ANTREAN HABIS
             if (currentAntrian.length === 0) {
                 let badge = document.getElementById('koneksi-badge');
                 badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">wifi</span> ONLINE: Sinkronisasi Aktif`;
