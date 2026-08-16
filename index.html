@@ -3563,15 +3563,24 @@ function prosesAntreanBackground() {
     .then(async (response) => {
         clearTimeout(timeoutId);
         if (response.ok) {
-            // JIKA BERHASIL TERHUBUNG KE SERVER, HAPUS DARI ANTREAN
+            // JIKA BERHASIL TERHUBUNG KE SERVER, HAPUS DARI ANTREAN LOKAL
             let currentAntrian = JSON.parse(localStorage.getItem('antrian_pakan')) || [];
             currentAntrian.splice(0, itemsToShift);
             localStorage.setItem('antrian_pakan', JSON.stringify(currentAntrian));
+
+            // 👉 FIX: KEMBALIKAN WARNA BADGE KE HIJAU JIKA ANTREAN HABIS
+            if (currentAntrian.length === 0) {
+                let badge = document.getElementById('koneksi-badge');
+                badge.innerHTML = `<span class="material-symbols-outlined" style="font-size:16px; vertical-align:middle;">wifi</span> ONLINE: Sinkronisasi Aktif`;
+                badge.style.background = "#8AA624";
+                badge.classList.remove('offline-badge');
+            }
         } else {
             const err = await response.json();
             console.error("Gagal insert Supabase:", err);
             throw new Error(err.message); // Lempar error agar dicoba lagi
         }
+    })
     })
     .catch(e => {
         clearTimeout(timeoutId);
@@ -5518,68 +5527,95 @@ function prosesAntreanBackground() {
         }
 
         function kirimCashflow() {
-            tutupKeyboard();
-            let jenis = document.querySelector('input[name="cf_jenis"]:checked').value;
-            let tgl = document.getElementById('cf_tanggal').value;
-            let metode = document.querySelector('input[name="cf_metode"]:checked').value;
-            let perkiraan = document.getElementById('cf_perkiraan').value;
-            let relasi = document.getElementById('cf_relasi').value.trim();
-            let nominal = parseInt(document.getElementById('cf_nominal').value.replace(/[^0-9]/g, '')) || 0;
-            let diskon = parseInt(document.getElementById('cf_diskon').value.replace(/[^0-9]/g, '')) || 0;
-            let deskripsi = document.getElementById('cf_deskripsi').value.trim();
+    tutupKeyboard();
+    let jenis = document.querySelector('input[name="cf_jenis"]:checked').value;
+    let tgl = document.getElementById('cf_tanggal').value;
+    let metode = document.querySelector('input[name="cf_metode"]:checked').value;
+    let perkiraan = document.getElementById('cf_perkiraan').value;
+    let relasi = document.getElementById('cf_relasi').value.trim();
+    let nominal = parseInt(document.getElementById('cf_nominal').value.replace(/[^0-9]/g, '')) || 0;
+    let diskon = parseInt(document.getElementById('cf_diskon').value.replace(/[^0-9]/g, '')) || 0;
+    let deskripsi = document.getElementById('cf_deskripsi').value.trim();
 
-            if (!relasi) return alert("Relasi tidak boleh kosong!");
-            if (nominal <= 0) return alert("Nominal harus lebih dari 0!");
-            if (!navigator.onLine) return alert("Wajib online untuk input Cashflow!");
+    if (!relasi) return alert("Relasi tidak boleh kosong!");
+    if (nominal <= 0) return alert("Nominal harus lebih dari 0!");
+    if (!navigator.onLine) return alert("Wajib online untuk input Cashflow!");
 
-            let payload = {
-                device_id: window.myDeviceId,
-                jenis: jenis,
-                tanggal: tgl,
-                metode: metode,
-                perkiraan: perkiraan,
-                relasi: relasi,
-                nominal: nominal,
-                diskon: diskon,
-                deskripsi: deskripsi,
-                fileData: fileBase64_Global ? { base64: fileBase64_Global, mime: fileMime_Global } : null
-            };
+    let btn = document.getElementById('btn-kirim-cf');
+    let status = document.getElementById('cf_status');
+    btn.innerHTML = `<span class="material-symbols-outlined">hourglass_empty</span> Memproses...`;
+    btn.disabled = true;
+    status.innerText = "Mengirim ke Supabase...";
+    status.style.color = "#FEA405";
 
-            let btn = document.getElementById('btn-kirim-cf');
-            let status = document.getElementById('cf_status');
-            btn.innerHTML = `<span class="material-symbols-outlined">hourglass_empty</span> Memproses...`;
-            btn.disabled = true;
-            status.innerText = "Mengirim ke server...";
-            status.style.color = "#FEA405";
+    // ----------------------------------------------------------------------
+    // SEMENTARA KITA TAHAN DULU UPLOAD GAMBARNYA (Fokus data teks masuk dulu)
+    // Nanti kita buatkan "Google Drive" ala Supabase (Supabase Storage)
+    // ----------------------------------------------------------------------
+    let buktiInfo = fileBase64_Global ? "Ada Bukti Gambar (Belum di-upload)" : "-";
 
-            suntikCacheOptimistic(payload);
+    // Format data disesuaikan dengan nama kolom tabel 'cashflow' di Supabase
+    let payloadSupa = {
+        tanggal: tgl,
+        jenis: jenis,
+        metode: metode,
+        kategori: perkiraan,
+        relasi: relasi,
+        nominal: nominal,
+        diskon: diskon,
+        keterangan: deskripsi,
+        bukti_url: buktiInfo,
+        petugas: activeUser || 'Admin'
+    };
 
-            fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({ source: 'cashflow', payload: payload })
-            }).then(res => res.json()).then(res => {
-                btn.innerHTML = `<span class="material-symbols-outlined">payments</span> Kirim Cashflow`;
-                btn.disabled = false;
-                if (res.status === 'success') {
-                    status.innerText = "✅ " + res.message;
-                    status.style.color = "#8AA624";
-                    document.getElementById('cf_relasi').value = "";
-                    document.getElementById('cf_nominal').value = "";
-                    document.getElementById('cf_diskon').value = "";
-                    document.getElementById('cf_deskripsi').value = "";
-                    hapusBukti();
-                    setTimeout(() => status.innerText = "", 3000);
-                } else {
-                    status.innerText = "❌ Gagal: " + res.message;
-                    status.style.color = "red";
-                }
-            }).catch(e => {
-                btn.innerHTML = `<span class="material-symbols-outlined">payments</span> Kirim Cashflow`;
-                btn.disabled = false;
-                status.innerText = "❌ Error jaringan: " + e.message;
-                status.style.color = "red";
-            });
+    // OPTIMISTIC UI: Tetap jalankan agar grafik/dashboard lokal langsung update
+    let payloadLokal = {
+        jenis: jenis,
+        tanggal: tgl,
+        metode: metode,
+        perkiraan: perkiraan,
+        relasi: relasi,
+        nominal: nominal,
+        diskon: diskon,
+        deskripsi: deskripsi
+    };
+    if (typeof suntikCacheOptimistic === 'function') suntikCacheOptimistic(payloadLokal);
+
+    // 🚀 TEMBAK LANGSUNG KE TABEL CASHFLOW SUPABASE
+    fetch(`${SUPA_URL}/rest/v1/cashflow`, {
+        method: 'POST',
+        headers: {
+            'apikey': SUPA_ANON_KEY,
+            'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(payloadSupa)
+    }).then(async res => {
+        btn.innerHTML = `<span class="material-symbols-outlined">payments</span> Kirim Cashflow`;
+        btn.disabled = false;
+
+        if (res.ok) {
+            status.innerText = "✅ Berhasil masuk Brankas Supabase!";
+            status.style.color = "#8AA624";
+            document.getElementById('cf_relasi').value = "";
+            document.getElementById('cf_nominal').value = "";
+            document.getElementById('cf_diskon').value = "";
+            document.getElementById('cf_deskripsi').value = "";
+            hapusBukti(); // Hapus gambar dari layar
+            setTimeout(() => status.innerText = "", 3000);
+        } else {
+            const err = await res.json();
+            status.innerText = "❌ Gagal: " + err.message;
+            status.style.color = "red";
         }
+    }).catch(e => {
+        btn.innerHTML = `<span class="material-symbols-outlined">payments</span> Kirim Cashflow`;
+        btn.disabled = false;
+        status.innerText = "❌ Error jaringan: " + e.message;
+        status.style.color = "red";
+    });
+}
 
         let pendingPayload = null;
         let pendingTeksWA = "";
