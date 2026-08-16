@@ -5577,7 +5577,7 @@ function prosesAntreanBackground() {
             fileMime_Global = "";
         }
 
-        function kirimCashflow() {
+        async function kirimCashflow() {
     tutupKeyboard();
     let jenis = document.querySelector('input[name="cf_jenis"]:checked').value;
     let tgl = document.getElementById('cf_tanggal').value;
@@ -5596,55 +5596,45 @@ function prosesAntreanBackground() {
     let status = document.getElementById('cf_status');
     btn.innerHTML = `<span class="material-symbols-outlined">hourglass_empty</span> Memproses...`;
     btn.disabled = true;
-    status.innerText = "Mengirim ke Supabase...";
-    status.style.color = "#FEA405";
+    
+    try {
+        let buktiUrl = "-";
+        
+        // 1. PROSES UPLOAD GAMBAR DULU (JIKA ADA)
+        if (fileBase64_Global) {
+            status.innerText = "Mengupload foto bukti...";
+            status.style.color = "#FEA405";
+            let namaFile = `CF_${Date.now()}.jpg`; // Bikin nama file unik
+            buktiUrl = await uploadGambarKeSupabase(fileBase64_Global, fileMime_Global, 'cashflow', namaFile);
+        }
 
-    // ----------------------------------------------------------------------
-    // SEMENTARA KITA TAHAN DULU UPLOAD GAMBARNYA (Fokus data teks masuk dulu)
-    // Nanti kita buatkan "Google Drive" ala Supabase (Supabase Storage)
-    // ----------------------------------------------------------------------
-    let buktiInfo = fileBase64_Global ? "Ada Bukti Gambar (Belum di-upload)" : "-";
+        // 2. SETELAH GAMBAR SUKSES, SIAPKAN DATA TEKS
+        status.innerText = "Menyimpan data transaksi...";
+        
+        let payloadSupa = {
+            tanggal: tgl,
+            jenis: jenis,
+            metode: metode,
+            kategori: perkiraan,
+            relasi: relasi,
+            nominal: nominal,
+            diskon: diskon,
+            keterangan: deskripsi,
+            bukti_url: buktiUrl,
+            petugas: activeUser || 'Admin'
+        };
 
-    // Format data disesuaikan dengan nama kolom tabel 'cashflow' di Supabase
-    let payloadSupa = {
-        tanggal: tgl,
-        jenis: jenis,
-        metode: metode,
-        kategori: perkiraan,
-        relasi: relasi,
-        nominal: nominal,
-        diskon: diskon,
-        keterangan: deskripsi,
-        bukti_url: buktiInfo,
-        petugas: activeUser || 'Admin'
-    };
-
-    // OPTIMISTIC UI: Tetap jalankan agar grafik/dashboard lokal langsung update
-    let payloadLokal = {
-        jenis: jenis,
-        tanggal: tgl,
-        metode: metode,
-        perkiraan: perkiraan,
-        relasi: relasi,
-        nominal: nominal,
-        diskon: diskon,
-        deskripsi: deskripsi
-    };
-    if (typeof suntikCacheOptimistic === 'function') suntikCacheOptimistic(payloadLokal);
-
-    // 🚀 TEMBAK LANGSUNG KE TABEL CASHFLOW SUPABASE
-    fetch(`${SUPA_URL}/rest/v1/cashflow`, {
-        method: 'POST',
-        headers: {
-            'apikey': SUPA_ANON_KEY,
-            'Authorization': `Bearer ${SUPA_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify(payloadSupa)
-    }).then(async res => {
-        btn.innerHTML = `<span class="material-symbols-outlined">payments</span> Kirim Cashflow`;
-        btn.disabled = false;
+        // 3. TEMBAK DATA KE TABEL CASHFLOW SUPABASE
+        let res = await fetch(`${SUPA_URL}/rest/v1/cashflow`, {
+            method: 'POST',
+            headers: {
+                'apikey': SUPA_ANON_KEY,
+                'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify(payloadSupa)
+        });
 
         if (res.ok) {
             status.innerText = "✅ Berhasil masuk Brankas Supabase!";
@@ -5653,19 +5643,20 @@ function prosesAntreanBackground() {
             document.getElementById('cf_nominal').value = "";
             document.getElementById('cf_diskon').value = "";
             document.getElementById('cf_deskripsi').value = "";
-            hapusBukti(); // Hapus gambar dari layar
+            hapusBukti(); // Bersihkan layar
             setTimeout(() => status.innerText = "", 3000);
         } else {
             const err = await res.json();
-            status.innerText = "❌ Gagal: " + err.message;
-            status.style.color = "red";
+            throw new Error(err.message);
         }
-    }).catch(e => {
+
+    } catch (e) {
+        status.innerText = "❌ Gagal: " + e.message;
+        status.style.color = "red";
+    } finally {
         btn.innerHTML = `<span class="material-symbols-outlined">payments</span> Kirim Cashflow`;
         btn.disabled = false;
-        status.innerText = "❌ Error jaringan: " + e.message;
-        status.style.color = "red";
-    });
+    }
 }
 
         let pendingPayload = null;
@@ -8073,4 +8064,39 @@ function prosesAntreanBackground() {
         } catch (e) {
             console.log("Pusher tidak aktif: ", e);
         }
+        // ==========================================
+// 🚀 FUNGSI UPLOAD GAMBAR KE SUPABASE STORAGE
+// ==========================================
+function base64ToBlob(base64, mimeType) {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+}
+
+async function uploadGambarKeSupabase(base64Data, mimeType, folderName, fileName) {
+    let blob = base64ToBlob(base64Data, mimeType);
+    let path = `${folderName}/${fileName}`;
+    
+    // Tembak ke API Storage Supabase
+    let res = await fetch(`${SUPA_URL}/storage/v1/object/berkas_cbl/${path}`, {
+        method: 'POST',
+        headers: {
+            'apikey': SUPA_ANON_KEY,
+            'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+            'Content-Type': mimeType
+        },
+        body: blob
+    });
+
+    if (res.ok) {
+        // Jika sukses, kembalikan URL Public-nya
+        return `${SUPA_URL}/storage/v1/object/public/berkas_cbl/${path}`;
+    } else {
+        throw new Error("Gagal mengupload gambar ke server.");
+    }
+}
     </script>
