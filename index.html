@@ -3529,7 +3529,8 @@ function prosesAntreanBackground() {
         for (let pakanName in pl.items) {
             let itemQty = pl.items[pakanName];
             let detail = pl.detail_items ? pl.detail_items[pakanName] : null;
-            let harga = detail ? (detail.harga || 0) : 0;
+            let harga_jual_sistem = detail ? (detail.harga || 0) : 0;
+            let harga = (pl.status === "Keluar") ? harga_jual_sistem : 0;
             let satuan = detail ? (detail.satuan || 'Kg') : 'Kg';
 
             // Masukkan info Ekor / Supplier ke catatan
