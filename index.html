@@ -4744,7 +4744,6 @@ async function prosesAntreanBackground() {
                 renderListPiutang();
             }
 
-            // JANGAN AUTO UPDATE: kalau bukan paksaan tombol Sync dan sudah ada cache, keluar saja
             if (!forceSync && cached) {
                 return;
             }
@@ -4757,7 +4756,7 @@ async function prosesAntreanBackground() {
 
             if (!navigator.onLine) return;
             
-            // 🚀 TEMBAK LANGSUNG KE KACAMATA PIUTANG SUPABASE
+            // 🚀 TEMBAK KE KACAMATA PIUTANG SUPABASE
             fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?select=*`, {
                 headers: {
                     'apikey': SUPA_ANON_KEY,
@@ -4770,14 +4769,10 @@ async function prosesAntreanBackground() {
                 let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
 
-                // 🛡️ PENGAMAN 1: Cek apakah Supabase menolak (Error View / RLS)
                 if (data.error || data.message) {
                     alert("Supabase Error: " + (data.message || data.error));
-                    console.error("Supabase Error:", data);
                     return;
                 }
-                
-                // 🛡️ PENGAMAN 2: Pastikan formatnya benar
                 if (!Array.isArray(data)) return;
 
                 // 🛠️ Menerjemahkan data Supabase menjadi Format PWA
@@ -4785,39 +4780,60 @@ async function prosesAntreanBackground() {
                 
                 data.forEach(row => {
                     let r = row.relasi;
-                    if (!r) return; // Lewati jika tidak ada relasi
+                    if (!r || r === "-") return; // Abaikan yang tidak ada nama relasinya
                     
                     if (!serverData[r]) {
                         serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: row.alamat || '-', dates: {} };
                     }
                     
-                    let tgl = row.tgl || "Tanpa Tanggal";
-                    if (!serverData[r].dates[tgl]) {
-                        serverData[r].dates[tgl] = {
+                    // Supabase pakai format yyyy-mm-dd, PWA butuh dd/mm/yyyy atau dd/mm/yy
+                    let tglAsli = row.tanggal || "2000-01-01";
+                    let parts = tglAsli.split('-');
+                    let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : tglAsli;
+                    
+                    if (!serverData[r].dates[tglFormated]) {
+                        serverData[r].dates[tglFormated] = {
                             isLokal: false,
-                            tgl: tgl,
-                            tagihan: parseFloat(row.tagihan) || 0,
-                            dp: parseFloat(row.dp) || 0,
-                            sisaNyata: parseFloat(row.sisa_tagihan) || 0,
-                            jt: row.jatuh_tempo || '', 
+                            tgl: tglFormated,
+                            tagihan: 0,
+                            dp: 0,
+                            sisaNyata: 0,
+                            jt: row.jatuh_tempo || '', // Opsional jika nanti ditambah
                             isTelat: row.is_telat || false,
                             items: []
                         };
                     }
+
+                    // HITUNGAN MANUAL DARI KOLOM SUPABASE
+                    let nominalRow = (parseFloat(row.qty) || 0) * (parseFloat(row.harga_satuan) || 0);
                     
-                    serverData[r].dates[tgl].items.push({
-                        pakan: row.pakan || 'Pakan',
-                        qty: parseFloat(row.qty) || 0,
-                        satuan: row.satuan || 'Kg',
-                        nominal: parseFloat(row.nominal) || 0
-                    });
+                    // Kalau ini adalah pembayaran (Cashflow)
+                    if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
+                        serverData[r].dates[tglFormated].dp += nominalRow;
+                        // Pembayaran kita anggap minus di tagihan untuk menyeimbangkan
+                    } else {
+                        // Kalau ini DO Pakan (Penjualan)
+                        serverData[r].dates[tglFormated].tagihan += nominalRow;
+                        serverData[r].dates[tglFormated].items.push({
+                            pakan: row.pakan_kategori || 'Pakan',
+                            qty: parseFloat(row.qty) || 0,
+                            satuan: row.satuan || 'Kg',
+                            nominal: nominalRow
+                        });
+                    }
                 });
 
-                // Kalkulasi Total Piutang per Konsumen
+                // Kalkulasi Sisa Nyata & Total Piutang per Konsumen
                 for (let r in serverData) {
                     for (let d in serverData[r].dates) {
                         let dateObj = serverData[r].dates[d];
+                        // Sisa Tagihan = Tagihan - DP
+                        dateObj.sisaNyata = dateObj.tagihan - dateObj.dp;
+                        
+                        // Bersihkan hari yang lunas / minus dari hitungan total jika perlu,
+                        // Tapi saat ini PWA menghitung semuanya sebagai Saldo Gabungan
                         serverData[r].total += dateObj.sisaNyata;
+                        
                         if (dateObj.isTelat) {
                             serverData[r].totalTelat += dateObj.sisaNyata;
                         } else {
@@ -4840,8 +4856,6 @@ async function prosesAntreanBackground() {
 
                 // Sisipkan data yang masih antre di HP (Optimistic UI)
                 let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                
-                // 🛡️ PENGAMAN 3: Anti-Crash saat membaca data lokal
                 let hasPendingPiutang = pendingMaster.some(x => x.status === "Keluar" && x.relasi && !String(x.relasi).toLowerCase().includes("kandang"));
                 
                 let localData = hasPendingPiutang ? JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}") : {};
@@ -4868,7 +4882,7 @@ async function prosesAntreanBackground() {
                     }
                 }
 
-                // Update UI PWA (Paksa render agar tulisan "Klik Sinkron" hilang)
+                // Update UI PWA
                 let strBaru = JSON.stringify(serverData);
                 dataPiutangLokal = serverData;
                 localStorage.setItem('piutang_ptcbl_cache', strBaru);
@@ -4880,9 +4894,9 @@ async function prosesAntreanBackground() {
                 let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
                 console.log("Gagal sync piutang:", err);
-                alert("Kesalahan JS: " + err.message);
+                alert("Kesalahan Data: " + err.message);
             });
-        }    
+        }
 
         function filterPiutang() {
             let val = document.getElementById('search-piutang').value.toLowerCase();
