@@ -4865,12 +4865,13 @@ async function prosesAntreanBackground() {
                     renderListPiutang();
                 }
 
-            }).catch(err => {
+           }).catch(err => {
                 document.getElementById('piutang-loader').classList.add('hidden');
                 let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
                 console.log("Gagal sync piutang:", err);
             });
+        }
 
         function filterPiutang() {
             let val = document.getElementById('search-piutang').value.toLowerCase();
