@@ -6895,29 +6895,31 @@ async function prosesAntreanBackground() {
                     loadingScreen.innerHTML = `<div style="text-align:center; padding-top:40vh; color:#8AA624;"><span class="material-symbols-outlined icon-spin" style="font-size:40px;">sync</span><br><br><b style="color:#1a5c40;">Memverifikasi Akun...</b></div>`;
                     document.body.appendChild(loadingScreen);
 
-                    fetch(API_URL, {
-                        method: 'POST',
-                        body: JSON.stringify({ source: 'check_member', nama: namaPencarian })
+                    // 🚀 CEK STATUS MEMBER LANGSUNG KE SUPABASE
+                    fetch(`${SUPA_URL}/rest/v1/master_relasi?nama=eq.${encodeURIComponent(namaPencarian)}&select=nama_lengkap`, {
+                        headers: {
+                            'apikey': SUPA_ANON_KEY,
+                            'Authorization': `Bearer ${SUPA_ANON_KEY}`
+                        }
                     })
-                        .then(r => r.json())
-                        .then(res => {
-                            document.getElementById('portal-init-loader').remove();
+                    .then(r => r.json())
+                    .then(data => {
+                        document.getElementById('portal-init-loader').remove();
 
-                            if (res.status === 'registered') {
-                                localStorage.setItem('is_member_cbl_' + namaPencarian, 'SAH');
-                                bukaLayarPortalKonsumen(namaPencarian);
-                            } else {
-                                document.getElementById('page-registration').classList.remove('hidden');
-                                document.getElementById('reg_nama_sistem').value = namaPencarian;
-
-                                // PANGGIL PETA SAAT FORM REGISTRASI DIBUKA (Delay biar div muncul dulu)
-                                setTimeout(() => { initMapLeaflet(); }, 800);
-                            }
-                        })
-                        .catch(e => {
-                            if (document.getElementById('portal-init-loader')) document.getElementById('portal-init-loader').remove();
-                            alert("Gagal terhubung ke server. Periksa koneksi internet Anda.");
-                        });
+                        // Jika data ditemukan DAN nama_lengkap sudah diisi, berarti sudah registrasi
+                        if (data.length > 0 && data[0].nama_lengkap) {
+                            localStorage.setItem('is_member_cbl_' + namaPencarian, 'SAH');
+                            bukaLayarPortalKonsumen(namaPencarian);
+                        } else {
+                            document.getElementById('page-registration').classList.remove('hidden');
+                            document.getElementById('reg_nama_sistem').value = namaPencarian;
+                            setTimeout(() => { initMapLeaflet(); }, 800);
+                        }
+                    })
+                    .catch(e => {
+                        if (document.getElementById('portal-init-loader')) document.getElementById('portal-init-loader').remove();
+                        alert("Gagal terhubung ke server Supabase. Periksa koneksi internet Anda.");
+                    });
                 }
             }
         });
@@ -7040,31 +7042,15 @@ async function prosesAntreanBackground() {
         // SUBMIT REGISTRASI (BEBAS NIK & AMAN)
         // ==========================================
         function kirimPendaftaran() {
-            // Pengaman Kategori
             let elKategori = document.getElementById('reg_kategori');
             let valKategori = elKategori ? elKategori.value : "Umum";
 
-            let p = {
-                namaSistem: document.getElementById('reg_nama_sistem').value,
-                namaLengkap: document.getElementById('reg_nama_lengkap').value.trim(),
-                kategori: valKategori,
+            let namaSistem = document.getElementById('reg_nama_sistem').value;
+            let namaLengkap = document.getElementById('reg_nama_lengkap').value.trim();
+            let wa = document.getElementById('reg_wa').value.trim();
+            let lat = document.getElementById('reg_lat').value;
 
-                // NIK SUDAH DIHAPUS DARI SINI BIAR GAK ERROR
-
-                wa: document.getElementById('reg_wa').value.trim(),
-
-                sapiPerah: document.getElementById('reg_perah').value || 0,
-                sapiNonPerah: document.getElementById('reg_nonperah').value || 0,
-
-                kapasitasKandang: document.getElementById('reg_kandang_cap').value || 0,
-                kapasitasGudang: document.getElementById('reg_gudang_cap').value || 0,
-
-                akses: document.getElementById('reg_akses').value,
-                lat: document.getElementById('reg_lat').value,
-                lng: document.getElementById('reg_lng').value
-            };
-
-            if (!p.namaLengkap || !p.wa || !p.lat) {
+            if (!namaLengkap || !wa || !lat) {
                 alert("Mohon lengkapi Nama Lengkap, No WA, dan Kunci Lokasi Kandang (Geser pin Peta)!"); return;
             }
 
@@ -7073,25 +7059,47 @@ async function prosesAntreanBackground() {
             btn.innerHTML = `<span class="material-symbols-outlined icon-spin">sync</span> Mengamankan Data...`;
             btn.disabled = true;
 
-            fetch(API_URL, {
+            // 🚀 PAYLOAD UNTUK SUPABASE
+            let supaPayload = {
+                nama: namaSistem, // Kolom Kunci (Primary/Unique)
+                nama_lengkap: namaLengkap,
+                kategori: valKategori,
+                wa: wa,
+                sapi_perah: parseInt(document.getElementById('reg_perah').value) || 0,
+                sapi_non_perah: parseInt(document.getElementById('reg_nonperah').value) || 0,
+                kapasitas_kandang: parseInt(document.getElementById('reg_kandang_cap').value) || 0,
+                kapasitas_gudang: parseFloat(document.getElementById('reg_gudang_cap').value) || 0,
+                akses_jalan: document.getElementById('reg_akses').value,
+                lat: parseFloat(lat) || null,
+                lng: parseFloat(document.getElementById('reg_lng').value) || null
+            };
+
+            // 🚀 TEMBAK KE SUPABASE DENGAN FITUR UPSERT (Update/Insert)
+            fetch(`${SUPA_URL}/rest/v1/master_relasi?on_conflict=nama`, {
                 method: 'POST',
-                body: JSON.stringify({ source: 'register_member', payload: p })
+                headers: {
+                    'apikey': SUPA_ANON_KEY,
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'resolution=merge-duplicates' // Jika nama sudah ada, lakukan UPDATE (Timpa)
+                },
+                body: JSON.stringify(supaPayload)
             })
-                .then(r => r.json())
-                .then(res => {
-                    btn.innerHTML = ori; btn.disabled = false;
-                    if (res.status === 'success') {
-                        alert("Registrasi Berhasil! Selamat datang di Portal CBL.");
-                        localStorage.setItem('is_member_cbl_' + p.namaSistem, 'SAH');
-                        bukaLayarPortalKonsumen(p.namaSistem);
-                    } else {
-                        alert("Gagal: " + res.message);
-                    }
-                })
-                .catch(e => {
-                    btn.innerHTML = ori; btn.disabled = false;
-                    alert("Error koneksi jaringan. Gagal mendaftar.");
-                });
+            .then(async (res) => {
+                btn.innerHTML = ori; btn.disabled = false;
+                if (res.ok || res.status === 201) {
+                    alert("Registrasi Berhasil! Selamat datang di Portal CBL.");
+                    localStorage.setItem('is_member_cbl_' + namaSistem, 'SAH');
+                    bukaLayarPortalKonsumen(namaSistem);
+                } else {
+                    const err = await res.json();
+                    alert("Gagal menyimpan data: " + err.message);
+                }
+            })
+            .catch(e => {
+                btn.innerHTML = ori; btn.disabled = false;
+                alert("Error koneksi jaringan. Gagal mendaftar.");
+            });
         }
 
         function switchTabKonsumen(tabId) {
