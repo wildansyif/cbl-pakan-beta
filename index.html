@@ -5362,30 +5362,6 @@ async function prosesAntreanBackground() {
                             }
                         });
 
-                        // 2. Kurangi stok server dengan transaksi Kandang yang masih pending di lokal
-                        let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                        pendingMaster.forEach(p => {
-                            if (p.isPending) {
-                                let isLokasiKandang = p.lokasiAsli === "/kandang" || p.lokasiAsli === "/spn_kandang";
-                                if (isLokasiKandang && p.gudang === u) {
-                                    if (p.status === "Masuk") {
-                                        if (serverStok[p.pakan] !== undefined) serverStok[p.pakan] += parseFloat(p.qty);
-                                        else serverStok[p.pakan] = parseFloat(p.qty);
-                                    } else if (p.status === "Keluar") {
-                                        if (serverStok[p.pakan] !== undefined) serverStok[p.pakan] -= parseFloat(p.qty);
-                                        else serverStok[p.pakan] = -parseFloat(p.qty);
-                                    }
-                                }
-                                else if (p.kat === "Mutasi" && p.status === "Keluar" && p.relasi && p.relasi.toLowerCase().includes("kandang")) {
-                                    if (serverStok[p.pakan] !== undefined) {
-                                        serverStok[p.pakan] += parseFloat(p.qty);
-                                    } else {
-                                        serverStok[p.pakan] = parseFloat(p.qty);
-                                    }
-                                }
-                            }
-                        });
-
                         globalStokKandang = serverStok;
                         localStorage.setItem('stok_kandang_ptcbl', JSON.stringify(globalStokKandang)); 
                         renderMiniDashboardKandang(); 
