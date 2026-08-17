@@ -5254,7 +5254,45 @@ async function prosesAntreanBackground() {
             } else {
                 document.getElementById('product-list').innerHTML = '<div class="loader">Membutuhkan koneksi internet...</div>';
             }
-            if (navigator.onLine) { fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'getPakan', lokasi: lokasi }) }).then(res => res.json()).then(res => { if (res.status === 'success') { localStorage.setItem('pakan_data_' + lokasi, JSON.stringify(res)); renderPakan(res); } }).catch(e => { console.log("Gagal fetch data"); document.getElementById('product-list').innerHTML = '<div class="loader">Gagal mengambil data dari server</div>'; }); }
+            // 🚀 TEMBAK LANGSUNG KE MASTER PAKAN SUPABASE
+            if (navigator.onLine) { 
+                let mapFilter = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'PM', '/spn_kandang': 'SPN' };
+                let cabangSaatIni = mapFilter[lokasi] || 'PM';
+
+                fetch(`${SUPA_URL}/rest/v1/master_pakan?select=*`, {
+                    headers: {
+                        'apikey': SUPA_ANON_KEY,
+                        'Authorization': `Bearer ${SUPA_ANON_KEY}`
+                    }
+                })
+                .then(res => res.json())
+                .then(data => { 
+                    // FILTER: Hanya tampilkan pakan yang ALL atau sesuai cabang
+                    let pakanTersedia = data.filter(p => 
+                        !p.lokasi_aktif || 
+                        p.lokasi_aktif === 'ALL' || 
+                        p.lokasi_aktif.includes(cabangSaatIni)
+                    );
+
+                    let formattedData = {
+                        status: 'success',
+                        data: pakanTersedia.map(p => ({
+                            nama: p.jenis_pakan, // Menggunakan kolom jenis_pakan
+                            harga: p.harga_jual || 0,
+                            satuan: p.satuan || 'Kg',
+                            kemasan: p.kemasan || 0
+                        }))
+                    };
+                    
+                    formattedData.data.sort((a, b) => a.nama.localeCompare(b.nama));
+                    localStorage.setItem('pakan_data_' + lokasi, JSON.stringify(formattedData)); 
+                    renderPakan(formattedData); 
+                })
+                .catch(e => { 
+                    console.log("Gagal fetch master pakan Supabase:", e); 
+                    document.getElementById('product-list').innerHTML = '<div class="loader">Gagal mengambil data dari server</div>'; 
+                }); 
+            }
             fetchStokKandang(); // Panggil pengecekan stok murni
         }
         let globalStokKandang = {};
@@ -5427,13 +5465,30 @@ async function prosesAntreanBackground() {
             if (cached) {
                 globalRelasi = JSON.parse(cached);
             }
+            
             if (navigator.onLine) {
-                fetch(`${API_URL}?action=getRelasi`).then(res => res.json()).then(res => {
-                    if (res.status === 'success') {
-                        globalRelasi = res.data;
-                        localStorage.setItem('data_relasi_cbl', JSON.stringify(globalRelasi));
+                // 🚀 TEMBAK LANGSUNG KE MASTER RELASI SUPABASE
+                fetch(`${SUPA_URL}/rest/v1/master_relasi?select=*`, {
+                    headers: {
+                        'apikey': SUPA_ANON_KEY,
+                        'Authorization': `Bearer ${SUPA_ANON_KEY}`
                     }
-                }).catch(e => console.log("Gagal muat"));
+                })
+                .then(res => res.json())
+                .then(data => {
+                    globalRelasi = data.map(r => ({
+                        nama: r.nama,
+                        kategori: r.kategori || 'Umum',
+                        wa: r.wa || '',
+                        alamat: r.alamat || '',
+                        lat: r.lat || 0,
+                        lng: r.lng || 0
+                    }));
+                    
+                    globalRelasi.sort((a, b) => a.nama.localeCompare(b.nama));
+                    localStorage.setItem('data_relasi_cbl', JSON.stringify(globalRelasi));
+                })
+                .catch(e => console.log("Gagal muat master relasi dari Supabase", e));
             }
         }
 
