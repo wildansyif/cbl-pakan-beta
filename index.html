@@ -4770,7 +4770,17 @@ async function prosesAntreanBackground() {
                 let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
 
-                // 🛠️ Menerjemahkan data Supabase (Baris) menjadi Format PWA (Objek Bersarang)
+                // 🛡️ PENGAMAN 1: Cek apakah Supabase menolak (Error View / RLS)
+                if (data.error || data.message) {
+                    alert("Supabase Error: " + (data.message || data.error));
+                    console.error("Supabase Error:", data);
+                    return;
+                }
+                
+                // 🛡️ PENGAMAN 2: Pastikan formatnya benar
+                if (!Array.isArray(data)) return;
+
+                // 🛠️ Menerjemahkan data Supabase menjadi Format PWA
                 let serverData = {};
                 
                 data.forEach(row => {
@@ -4781,7 +4791,7 @@ async function prosesAntreanBackground() {
                         serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: row.alamat || '-', dates: {} };
                     }
                     
-                    let tgl = row.tgl; // Format dari View: DD/MM/YY atau DD/MM/YYYY
+                    let tgl = row.tgl || "Tanpa Tanggal";
                     if (!serverData[r].dates[tgl]) {
                         serverData[r].dates[tgl] = {
                             isLokal: false,
@@ -4795,12 +4805,11 @@ async function prosesAntreanBackground() {
                         };
                     }
                     
-                    // Masukkan daftar pakan yang diutang pada tanggal tersebut
                     serverData[r].dates[tgl].items.push({
-                        pakan: row.pakan,
-                        qty: parseFloat(row.qty),
+                        pakan: row.pakan || 'Pakan',
+                        qty: parseFloat(row.qty) || 0,
                         satuan: row.satuan || 'Kg',
-                        nominal: parseFloat(row.nominal)
+                        nominal: parseFloat(row.nominal) || 0
                     });
                 });
 
@@ -4820,7 +4829,6 @@ async function prosesAntreanBackground() {
                 // --- PEMBERSIH GHOST CACHE PIUTANG ---
                 let antrian = JSON.parse(localStorage.getItem('antrian_pakan') || "[]");
                 if (antrian.length === 0) {
-                    localStorage.removeItem('pending_master_data');
                     let piutangCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
                     for (let k in piutangCache) {
                         for (let d in piutangCache[k].dates) {
@@ -4832,21 +4840,26 @@ async function prosesAntreanBackground() {
 
                 // Sisipkan data yang masih antre di HP (Optimistic UI)
                 let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                let hasPendingPiutang = pendingMaster.some(x => x.status === "Keluar" && !x.relasi.toLowerCase().includes("kandang"));
+                
+                // 🛡️ PENGAMAN 3: Anti-Crash saat membaca data lokal
+                let hasPendingPiutang = pendingMaster.some(x => x.status === "Keluar" && x.relasi && !String(x.relasi).toLowerCase().includes("kandang"));
+                
                 let localData = hasPendingPiutang ? JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}") : {};
 
                 for (let r in localData) {
                     for (let d in localData[r].dates) {
                         if (localData[r].dates[d].isLokal) {
-                            // Normalisasi Format Tanggal
-                            let parts = d.split('/');
-                            let fullYear = parts[2].length === 2 ? "20" + parts[2] : parts[2];
-                            let normalizedDate = `${parts[0]}/${parts[1]}/${fullYear}`;
+                            let parts = String(d).split('/');
+                            let normalizedDate = d;
+                            if (parts.length === 3) {
+                                let fullYear = parts[2].length === 2 ? "20" + parts[2] : parts[2];
+                                normalizedDate = `${parts[0]}/${parts[1]}/${fullYear}`;
+                            }
 
                             if (!serverData[r]) serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: localData[r].alamat, dates: {} };
                             
                             if (serverData[r].dates[normalizedDate] || serverData[r].dates[d]) {
-                                continue; // Skip jika sudah masuk di server
+                                continue; 
                             } else {
                                 serverData[r].dates[d] = localData[r].dates[d];
                                 serverData[r].total += localData[r].dates[d].sisaNyata || localData[r].dates[d].tagihan;
@@ -4855,23 +4868,20 @@ async function prosesAntreanBackground() {
                     }
                 }
 
-                // Update UI PWA
+                // Update UI PWA (Paksa render agar tulisan "Klik Sinkron" hilang)
                 let strBaru = JSON.stringify(serverData);
-                let cached = localStorage.getItem('piutang_ptcbl_cache');
+                dataPiutangLokal = serverData;
+                localStorage.setItem('piutang_ptcbl_cache', strBaru);
                 
-                if (strBaru !== cached) {
-                    dataPiutangLokal = serverData;
-                    localStorage.setItem('piutang_ptcbl_cache', strBaru);
-                    renderListPiutang();
-                }
+                renderListPiutang();
 
-           }).catch(err => {
+            }).catch(err => {
                 document.getElementById('piutang-loader').classList.add('hidden');
                 let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
                 console.log("Gagal sync piutang:", err);
+                alert("Kesalahan JS: " + err.message);
             });
-        }
 
         function filterPiutang() {
             let val = document.getElementById('search-piutang').value.toLowerCase();
