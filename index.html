@@ -3076,20 +3076,33 @@
                 return;
             }
 
-            fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'tarik_stok' }) })
-                .then(r => r.json()).then(res => {
-                    document.getElementById('stok-loader').classList.add('hidden');
-                    if (res.status === 'success') {
-                        globalDataStok = res.data;
-                        populateDropdownStok();
-                        renderListStokV5();
-                    } else {
-                        alert("Gagal menarik stok: " + res.message);
-                    }
-                }).catch(e => {
-                    document.getElementById('stok-loader').classList.add('hidden');
-                    alert("Error jaringan: " + e.message);
-                });
+            // 🚀 TEMBAK KE STOK_BATCH SUPABASE (Hanya ambil yang sisanya > 0)
+            fetch(`${SUPA_URL}/rest/v1/stok_batch?qty_sisa=gt.0&select=*`, {
+                headers: {
+                    'apikey': SUPA_ANON_KEY,
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`
+                }
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('stok-loader').classList.add('hidden');
+                
+                // Format/Map data Supabase agar dimengerti oleh sistem UI PWA Anda
+                globalDataStok = data.map(s => ({
+                    gudang: s.cabang,
+                    blok: s.blok || 'Tanpa Blok',
+                    pakan: s.pakan,
+                    qty: s.qty_sisa,
+                    tglMasuk: s.tanggal_masuk,
+                    batchId: s.id
+                }));
+                
+                populateDropdownStok();
+                renderListStokV5();
+            }).catch(e => {
+                document.getElementById('stok-loader').classList.add('hidden');
+                alert("Error jaringan: " + e.message);
+            });
         }
 
         function populateDropdownStok() {
@@ -5326,61 +5339,60 @@ async function prosesAntreanBackground() {
                     let ind = document.getElementById('stok-kandang-indicator');
                     if (ind) ind.innerHTML = ICON_SYNCING;
 
-                    fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'tarik_stok_kandang' }) })
-                        .then(r => r.json()).then(res => {
-                            loader.classList.add('hidden');
-                            if (res.status === 'success') {
-                                let ind = document.getElementById('stok-kandang-indicator');
-                                if (ind) ind.innerHTML = ICON_SYNCED;
-                                // 1. Konversi array dari server menjadi object sederhana { "Nama Pakan": Sisa Stok }
-                                let serverStok = {};
-                                let u = document.querySelector('input[name="lokasi_utama"]:checked') ? document.querySelector('input[name="lokasi_utama"]:checked').value : 'PM';
+                    // 🚀 TEMBAK KE VIEW KANDANG DI SUPABASE
+                    fetch(`${SUPA_URL}/rest/v1/view_stok_kandang?select=*`, {
+                        headers: {
+                            'apikey': SUPA_ANON_KEY,
+                            'Authorization': `Bearer ${SUPA_ANON_KEY}`
+                        }
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        loader.classList.add('hidden');
+                        let ind = document.getElementById('stok-kandang-indicator');
+                        if (ind) ind.innerHTML = ICON_SYNCED;
+                        
+                        let serverStok = {};
+                        let u = document.querySelector('input[name="lokasi_utama"]:checked') ? document.querySelector('input[name="lokasi_utama"]:checked').value : 'PM';
 
-                                (res.data || []).forEach(val => {
-                                    if (val.gudang && val.gudang !== u) return; // Abaikan gudang lain
-                                    let name = val.pakan || val.nama || val.Jenis || val.jenis;
-                                    let sisa = val.qtyKandang !== undefined ? val.qtyKandang : (val.sisa !== undefined ? val.sisa : (val.qty !== undefined ? val.qty : val.stok));
-                                    if (sisa === undefined && Array.isArray(val)) { name = val[0]; sisa = val[1]; }
-                                    if (name) serverStok[name] = parseFloat(sisa) || 0;
-                                });
-
-                                // --- SOLUSI BOTTLENECK: CEGAH STOK MELOMPAT BALIK ---
-                                // Kurangi stok server dengan transaksi Kandang yang masih pending di lokal
-                                let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                                pendingMaster.forEach(p => {
-                                    // Pastikan transaksinya belum tervalidasi server (isPending) dan memang dari/ke Kandang
-                                    if (p.isPending) {
-                                        let isLokasiKandang = p.lokasiAsli === "/kandang" || p.lokasiAsli === "/spn_kandang";
-
-                                        // 1. Jika transaksi ini murni berasal dari form Kandang (termasuk Koreksi Transaksi Kandang)
-                                        if (isLokasiKandang && p.gudang === u) {
-                                            if (p.status === "Masuk") {
-                                                if (serverStok[p.pakan] !== undefined) serverStok[p.pakan] += parseFloat(p.qty);
-                                                else serverStok[p.pakan] = parseFloat(p.qty);
-                                            } else if (p.status === "Keluar") {
-                                                if (serverStok[p.pakan] !== undefined) serverStok[p.pakan] -= parseFloat(p.qty);
-                                                else serverStok[p.pakan] = -parseFloat(p.qty);
-                                            }
-                                        }
-                                        // 2. Jika ini adalah Mutasi dari Gudang Utama ke Kandang (Form Gudang, tujuan Kandang)
-                                        else if (p.kat === "Mutasi" && p.status === "Keluar" && p.relasi && p.relasi.toLowerCase().includes("kandang")) {
-                                            if (serverStok[p.pakan] !== undefined) {
-                                                serverStok[p.pakan] += parseFloat(p.qty);
-                                            } else {
-                                                serverStok[p.pakan] = parseFloat(p.qty);
-                                            }
-                                        }
-                                    }
-                                });
-
-                                globalStokKandang = serverStok;
-                                localStorage.setItem('stok_kandang_ptcbl', JSON.stringify(globalStokKandang)); // Save ke memori HP
-                                renderMiniDashboardKandang(); // Refresh layar
+                        // 1. Ekstrak data
+                        data.forEach(val => {
+                            if (val.gudang === u) {
+                                serverStok[val.pakan] = parseFloat(val.sisa) || 0;
                             }
-                        }).catch(e => {
-                            loader.classList.add('hidden');
-                            console.log("Koneksi lambat, memakai stok kandang lokal.");
                         });
+
+                        // 2. Kurangi stok server dengan transaksi Kandang yang masih pending di lokal
+                        let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
+                        pendingMaster.forEach(p => {
+                            if (p.isPending) {
+                                let isLokasiKandang = p.lokasiAsli === "/kandang" || p.lokasiAsli === "/spn_kandang";
+                                if (isLokasiKandang && p.gudang === u) {
+                                    if (p.status === "Masuk") {
+                                        if (serverStok[p.pakan] !== undefined) serverStok[p.pakan] += parseFloat(p.qty);
+                                        else serverStok[p.pakan] = parseFloat(p.qty);
+                                    } else if (p.status === "Keluar") {
+                                        if (serverStok[p.pakan] !== undefined) serverStok[p.pakan] -= parseFloat(p.qty);
+                                        else serverStok[p.pakan] = -parseFloat(p.qty);
+                                    }
+                                }
+                                else if (p.kat === "Mutasi" && p.status === "Keluar" && p.relasi && p.relasi.toLowerCase().includes("kandang")) {
+                                    if (serverStok[p.pakan] !== undefined) {
+                                        serverStok[p.pakan] += parseFloat(p.qty);
+                                    } else {
+                                        serverStok[p.pakan] = parseFloat(p.qty);
+                                    }
+                                }
+                            }
+                        });
+
+                        globalStokKandang = serverStok;
+                        localStorage.setItem('stok_kandang_ptcbl', JSON.stringify(globalStokKandang)); 
+                        renderMiniDashboardKandang(); 
+                    }).catch(e => {
+                        loader.classList.add('hidden');
+                        console.log("Koneksi lambat, memakai stok kandang lokal.");
+                    });
                 } else {
                     loader.classList.add('hidden');
                 }
