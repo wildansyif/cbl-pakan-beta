@@ -4738,68 +4738,121 @@ async function prosesAntreanBackground() {
             }
 
             if (!navigator.onLine) return;
-            fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'tarik_piutang' }) }).then(r => r.json()).then(res => {
+            
+            // 🚀 TEMBAK LANGSUNG KE KACAMATA PIUTANG SUPABASE
+            fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?select=*`, {
+                headers: {
+                    'apikey': SUPA_ANON_KEY,
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`
+                }
+            })
+            .then(r => r.json())
+            .then(data => {
                 document.getElementById('piutang-loader').classList.add('hidden');
                 let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
 
-                if (res.status === 'success') {
-                    let serverData = res.data;
+                // 🛠️ Menerjemahkan data Supabase (Baris) menjadi Format PWA (Objek Bersarang)
+                let serverData = {};
+                
+                data.forEach(row => {
+                    let r = row.relasi;
+                    if (!r) return; // Lewati jika tidak ada relasi
+                    
+                    if (!serverData[r]) {
+                        serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: row.alamat || '-', dates: {} };
+                    }
+                    
+                    let tgl = row.tgl; // Format dari View: DD/MM/YY atau DD/MM/YYYY
+                    if (!serverData[r].dates[tgl]) {
+                        serverData[r].dates[tgl] = {
+                            isLokal: false,
+                            tgl: tgl,
+                            tagihan: parseFloat(row.tagihan) || 0,
+                            dp: parseFloat(row.dp) || 0,
+                            sisaNyata: parseFloat(row.sisa_tagihan) || 0,
+                            jt: row.jatuh_tempo || '', 
+                            isTelat: row.is_telat || false,
+                            items: []
+                        };
+                    }
+                    
+                    // Masukkan daftar pakan yang diutang pada tanggal tersebut
+                    serverData[r].dates[tgl].items.push({
+                        pakan: row.pakan,
+                        qty: parseFloat(row.qty),
+                        satuan: row.satuan || 'Kg',
+                        nominal: parseFloat(row.nominal)
+                    });
+                });
 
-                    // --- PEMBERSIH GHOST CACHE PIUTANG ---
-                    // Jika tidak ada data yang sedang antre untuk diupload, berarti semua data lokal sudah masuk ke server.
-                    // Maka kita bisa menghapus status pending-nya, sehingga data yang dihapus di spreadsheet benar-benar hilang dari UI.
-                    let antrian = JSON.parse(localStorage.getItem('antrian_pakan') || "[]");
-                    if (antrian.length === 0) {
-                        // Bersihkan pending piutang (dan master lain) karena semua sudah terkirim
-                        localStorage.removeItem('pending_master_data');
-                        
-                        // Bersihkan juga flag isLokal di cache piutang
-                        let piutangCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
-                        for (let k in piutangCache) {
-                            for (let d in piutangCache[k].dates) {
-                                piutangCache[k].dates[d].isLokal = false;
+                // Kalkulasi Total Piutang per Konsumen
+                for (let r in serverData) {
+                    for (let d in serverData[r].dates) {
+                        let dateObj = serverData[r].dates[d];
+                        serverData[r].total += dateObj.sisaNyata;
+                        if (dateObj.isTelat) {
+                            serverData[r].totalTelat += dateObj.sisaNyata;
+                        } else {
+                            serverData[r].totalSehat += dateObj.sisaNyata;
+                        }
+                    }
+                }
+
+                // --- PEMBERSIH GHOST CACHE PIUTANG ---
+                let antrian = JSON.parse(localStorage.getItem('antrian_pakan') || "[]");
+                if (antrian.length === 0) {
+                    localStorage.removeItem('pending_master_data');
+                    let piutangCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
+                    for (let k in piutangCache) {
+                        for (let d in piutangCache[k].dates) {
+                            piutangCache[k].dates[d].isLokal = false;
+                        }
+                    }
+                    localStorage.setItem('piutang_ptcbl_cache', JSON.stringify(piutangCache));
+                }
+
+                // Sisipkan data yang masih antre di HP (Optimistic UI)
+                let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
+                let hasPendingPiutang = pendingMaster.some(x => x.status === "Keluar" && !x.relasi.toLowerCase().includes("kandang"));
+                let localData = hasPendingPiutang ? JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}") : {};
+
+                for (let r in localData) {
+                    for (let d in localData[r].dates) {
+                        if (localData[r].dates[d].isLokal) {
+                            // Normalisasi Format Tanggal
+                            let parts = d.split('/');
+                            let fullYear = parts[2].length === 2 ? "20" + parts[2] : parts[2];
+                            let normalizedDate = `${parts[0]}/${parts[1]}/${fullYear}`;
+
+                            if (!serverData[r]) serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: localData[r].alamat, dates: {} };
+                            
+                            if (serverData[r].dates[normalizedDate] || serverData[r].dates[d]) {
+                                continue; // Skip jika sudah masuk di server
+                            } else {
+                                serverData[r].dates[d] = localData[r].dates[d];
+                                serverData[r].total += localData[r].dates[d].sisaNyata || localData[r].dates[d].tagihan;
                             }
                         }
-                        localStorage.setItem('piutang_ptcbl_cache', JSON.stringify(piutangCache));
                     }
-                    // -------------------------------------
+                }
 
-                    let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                    let hasPendingPiutang = pendingMaster.some(x => x.status === "Keluar" && !x.relasi.toLowerCase().includes("kandang"));
-                    let localData = hasPendingPiutang ? JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}") : {};
+                // Update UI PWA
+                let strBaru = JSON.stringify(serverData);
+                let cached = localStorage.getItem('piutang_ptcbl_cache');
+                
+                if (strBaru !== cached) {
+                    dataPiutangLokal = serverData;
+                    localStorage.setItem('piutang_ptcbl_cache', strBaru);
+                    renderListPiutang();
+                }
 
-                    for (let r in localData) {
-                        for (let d in localData[r].dates) {
-                            if (localData[r].dates[d].isLokal) {
-                                let parts = d.split('/');
-                                let fullYear = parts[2].length === 2 ? "20" + parts[2] : parts[2];
-                                let normalizedDate = `${parts[0]}/${parts[1]}/${fullYear}`;
-
-                                if (!serverData[r]) serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: localData[r].alamat, dates: {} };
-                                if (serverData[r].dates[normalizedDate]) {
-                                    continue;
-                                } else {
-                                    serverData[r].dates[d] = localData[r].dates[d];
-                                    serverData[r].total += localData[r].dates[d].sisaNyata || localData[r].dates[d].tagihan;
-                                }
-                            }
-                        }
-                    }
-
-                    let strBaru = JSON.stringify(serverData);
-                    if (strBaru !== cached) {
-                        dataPiutangLokal = serverData;
-                        localStorage.setItem('piutang_ptcbl_cache', strBaru);
-                        renderListPiutang();
-                    }
-                } else { if (!cached) document.getElementById('piutang-list').innerHTML = `<div style='text-align:center; padding:20px; color:red; font-weight:bold;'>Gagal memuat: ${res.message}</div>`; }
             }).catch(err => {
                 document.getElementById('piutang-loader').classList.add('hidden');
                 let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
+                console.log("Gagal sync piutang:", err);
             });
-        }
 
         function filterPiutang() {
             let val = document.getElementById('search-piutang').value.toLowerCase();
