@@ -4882,6 +4882,7 @@ async function prosesAntreanBackground() {
                 console.log("Gagal sync piutang:", err);
                 alert("Kesalahan JS: " + err.message);
             });
+        }    
 
         function filterPiutang() {
             let val = document.getElementById('search-piutang').value.toLowerCase();
