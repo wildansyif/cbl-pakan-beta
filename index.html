@@ -3426,6 +3426,53 @@
                 }).catch(e => { document.getElementById('ks-loader').classList.add('hidden'); alert("Error jaringan: " + e.message); });
         }
 
+        function cekKartuStok(pakan, blok, gudang, batchId) {
+            document.getElementById('modal-kartu-stok').classList.remove('hidden');
+            document.getElementById('ks-subtitle').innerText = `${pakan} | ${blok} | Gudang ${gudang}`;
+            document.getElementById('ks-tbody').innerHTML = "";
+            document.getElementById('ks-loader').classList.remove('hidden');
+
+            if (!navigator.onLine) {
+                document.getElementById('ks-loader').classList.add('hidden');
+                alert("Wajib online untuk menarik riwayat stok!");
+                return;
+            }
+
+            // 🚀 TEMBAK LANGSUNG KE VIEW KARTU STOK BATCH
+            fetch(`${SUPA_URL}/rest/v1/view_kartu_stok_batch?batch_id=eq.${batchId}&order=urutan_waktu.asc`, {
+                headers: {
+                    'apikey': SUPA_ANON_KEY,
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`
+                }
+            })
+            .then(r => r.json())
+            .then(res => {
+                document.getElementById('ks-loader').classList.add('hidden');
+                let html = ""; let nf = new Intl.NumberFormat('id-ID');
+                
+                if (res.length === 0) {
+                    html = "<tr><td colspan='5' style='text-align:center; padding:20px; color:#888;'>Tidak ada riwayat transaksi.</td></tr>";
+                } else {
+                    res.forEach(d => {
+                        let strIn = d.inqty > 0 ? `+${nf.format(d.inqty)}` : "-";
+                        let strOut = d.outqty > 0 ? `-${nf.format(d.outqty)}` : "-";
+                        html += `
+                        <tr style="border-bottom:1px solid #eee; background:#fff;">
+                            <td style="padding:8px 5px;">${d.tgl}</td>
+                            <td style="padding:8px 5px;"><strong style="color:#555;">${d.status}</strong><br><span style="color:#888; font-size:9px;">${d.relasi}</span></td>
+                            <td style="padding:8px 5px; text-align:right; font-weight:bold; color:#8AA624;">${strIn}</td>
+                            <td style="padding:8px 5px; text-align:right; font-weight:bold; color:#c62828;">${strOut}</td>
+                            <td style="padding:8px 5px; text-align:right; font-weight:bold; background:#fafafa;">${nf.format(d.saldo)}</td>
+                        </tr>`;
+                    });
+                }
+                document.getElementById('ks-tbody').innerHTML = html;
+            }).catch(e => { 
+                document.getElementById('ks-loader').classList.add('hidden'); 
+                alert("Error jaringan: " + e.message); 
+            });
+        }
+
         function cekKartuStokBlok(pakan, blok, gudang) {
             document.getElementById('modal-kartu-stok').classList.remove('hidden');
             document.getElementById('ks-subtitle').innerText = `${pakan} | Perputaran ${blok} | Gudang ${gudang}`;
@@ -3438,30 +3485,39 @@
                 return;
             }
 
-            fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'riwayat_stok', payload: { pakan: pakan, gudang: gudang, blok: blok, mode: 'blok' } }) })
-                .then(r => r.json()).then(res => {
-                    document.getElementById('ks-loader').classList.add('hidden');
-                    if (res.status === 'success') {
-                        let html = ""; let nf = new Intl.NumberFormat('id-ID');
-                        if (res.data.length === 0) {
-                            html = "<tr><td colspan='5' style='text-align:center; padding:20px; color:#888;'>Tidak ada riwayat perputaran di blok ini.</td></tr>";
-                        } else {
-                            res.data.forEach(d => {
-                                let strIn = d.inQty > 0 ? `+${nf.format(d.inQty)}` : "-";
-                                let strOut = d.outQty > 0 ? `-${nf.format(d.outQty)}` : "-";
-                                html += `
-                          <tr style="border-bottom:1px solid #eee; background:#fff;">
-                              <td style="padding:8px 5px;">${d.tgl}</td>
-                              <td style="padding:8px 5px;"><strong style="color:#555;">${d.status}</strong><br><span style="color:#888; font-size:9px;">${d.relasi}</span></td>
-                              <td style="padding:8px 5px; text-align:right; font-weight:bold; color:#8AA624;">${strIn}</td>
-                              <td style="padding:8px 5px; text-align:right; font-weight:bold; color:#c62828;">${strOut}</td>
-                              <td style="padding:8px 5px; text-align:right; font-weight:bold; background:#fafafa;">${nf.format(d.saldo)}</td>
-                          </tr>`;
-                            });
-                        }
-                        document.getElementById('ks-tbody').innerHTML = html;
-                    } else { alert("Gagal menarik data: " + res.message); }
-                }).catch(e => { document.getElementById('ks-loader').classList.add('hidden'); alert("Error jaringan: " + e.message); });
+            // 🚀 TEMBAK LANGSUNG KE VIEW KARTU STOK BLOK
+            fetch(`${SUPA_URL}/rest/v1/view_kartu_stok_blok?gudang=eq.${gudang}&blok=eq.${blok}&pakan=eq.${pakan}&order=urutan_waktu.asc`, {
+                headers: {
+                    'apikey': SUPA_ANON_KEY,
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`
+                }
+            })
+            .then(r => r.json())
+            .then(res => {
+                document.getElementById('ks-loader').classList.add('hidden');
+                let html = ""; let nf = new Intl.NumberFormat('id-ID');
+                
+                if (res.length === 0) {
+                    html = "<tr><td colspan='5' style='text-align:center; padding:20px; color:#888;'>Tidak ada riwayat perputaran di blok ini.</td></tr>";
+                } else {
+                    res.forEach(d => {
+                        let strIn = d.inqty > 0 ? `+${nf.format(d.inqty)}` : "-";
+                        let strOut = d.outqty > 0 ? `-${nf.format(d.outqty)}` : "-";
+                        html += `
+                        <tr style="border-bottom:1px solid #eee; background:#fff;">
+                            <td style="padding:8px 5px;">${d.tgl}</td>
+                            <td style="padding:8px 5px;"><strong style="color:#555;">${d.status}</strong><br><span style="color:#888; font-size:9px;">${d.relasi}</span></td>
+                            <td style="padding:8px 5px; text-align:right; font-weight:bold; color:#8AA624;">${strIn}</td>
+                            <td style="padding:8px 5px; text-align:right; font-weight:bold; color:#c62828;">${strOut}</td>
+                            <td style="padding:8px 5px; text-align:right; font-weight:bold; background:#fafafa;">${nf.format(d.saldo)}</td>
+                        </tr>`;
+                    });
+                }
+                document.getElementById('ks-tbody').innerHTML = html;
+            }).catch(e => { 
+                document.getElementById('ks-loader').classList.add('hidden'); 
+                alert("Error jaringan: " + e.message); 
+            });
         }
 
         function simpanKeAntrianLokal(payload) {
