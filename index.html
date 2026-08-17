@@ -5461,10 +5461,8 @@ async function prosesAntreanBackground() {
         function renderPakan(response) { currentItems = response.data || []; let html = ''; if (currentItems.length === 0) html = '<div class="loader">Tidak ada data pakan</div>'; else { currentItems.forEach(function (item, index) { let formatHarga = new Intl.NumberFormat('id-ID').format(item.harga || 0); let labelInput = item.satuan || "Kg"; if (item.kemasan > 0) { let stepValue = item.kemasan; html += `<div class="menu-item"><div class="item-info"><div class="item-name">${item.nama}</div>${item.harga > 0 ? '<div class="item-price">Rp ' + formatHarga + ' / Kg</div>' : ''}</div><div class="counter-box" style="flex-direction: column; align-items: flex-end; gap: 2px;"><div style="display:flex; align-items:center; gap:5px;"><div class="btn-qty" onclick="ubahQty(${index}, -${stepValue})">-</div><input type="text" id="qty-${index}" class="qty-input calc-input" style="width: 55px !important; text-align:center !important; padding:0 !important;" placeholder="0" onclick="bukaKeyboard(${index})" readonly data-total="0" data-karung="0" data-kemasan="${stepValue}" data-satuan="${item.satuan}"><div class="btn-qty" onclick="ubahQty(${index}, ${stepValue})">+</div><span style="font-size:12px; font-weight:bold;">${labelInput}</span></div><span id="lbl-karung-${index}" style="font-size:11px; color:#e91e63; font-weight:bold; height:14px; margin-right: 20px;"></span></div></div>`; } else { html += `<div class="menu-item"><div class="item-info" style="flex: 1;"><div class="item-name">${item.nama}</div>${item.harga > 0 ? '<div class="item-price">Rp ' + formatHarga + ' / Kg</div>' : ''}</div><div class="counter-box" style="flex: 1.5; justify-content: flex-end;"><input type="text" id="qty-${index}" class="qty-input calc-input" placeholder="Cth: 35+28" onclick="bukaKeyboard(${index})" readonly data-total="0" data-karung="0" data-kemasan="0" data-satuan="${item.satuan}"><span id="hasil-${index}" class="hasil-calc">= 0</span><span style="font-size:12px; font-weight:bold; margin-left:5px;">${labelInput}</span></div></div>`; } }); } document.getElementById('product-list').innerHTML = html; }
 
         function fetchMasterRelasi() {
-            let cached = localStorage.getItem('data_relasi_cbl');
-            if (cached) {
-                globalRelasi = JSON.parse(cached);
-            }
+            // PAKSA HAPUS CACHE LAMA AGAR SELALU AMBIL FRESH DARI SUPABASE
+            localStorage.removeItem('data_relasi_cbl'); 
             
             if (navigator.onLine) {
                 // 🚀 TEMBAK LANGSUNG KE MASTER RELASI SUPABASE
@@ -5486,6 +5484,8 @@ async function prosesAntreanBackground() {
                     }));
                     
                     globalRelasi.sort((a, b) => a.nama.localeCompare(b.nama));
+                    
+                    // Simpan cache yang baru (versi Supabase)
                     localStorage.setItem('data_relasi_cbl', JSON.stringify(globalRelasi));
                 })
                 .catch(e => console.log("Gagal muat master relasi dari Supabase", e));
