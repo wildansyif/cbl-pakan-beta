@@ -7786,10 +7786,6 @@ async function prosesAntreanBackground() {
                 if (m.jenis === 'DO') {
                     subTagihan += m.tagihan;
                     let ketPakan = `<b>Pengambilan Pakan:</b><br>`;
-                        ? '<b style="color:#15803d;">[LUNAS]</b>'
-                        : `<b style="color:#e65100;">[${statUpper}]</b>`;
-
-                    let ketPakan = `<b>Pengambilan Pakan:</b> <i style="font-size:9px;">${txtStatus}</i><br>`;
 
                     if (m.items && m.items.length > 0) {
                         m.items.forEach(it => {
