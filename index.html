@@ -4777,20 +4777,31 @@ async function prosesAntreanBackground() {
 
                 // 🛠️ Menerjemahkan data Supabase menjadi Format PWA
                 let serverData = {};
+                let hariIni = new Date();
+                hariIni.setHours(0, 0, 0, 0); // Kunci jam di 00:00:00 agar hitungan akurat
                 
                 data.forEach(row => {
                     let r = row.relasi;
-                    if (!r || r === "-") return; // Abaikan yang tidak ada nama relasinya
+                    if (!r || r === "-") return; 
                     
                     if (!serverData[r]) {
                         serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: row.alamat || '-', dates: {} };
                     }
                     
-                    // Supabase pakai format yyyy-mm-dd, PWA butuh dd/mm/yyyy atau dd/mm/yy
                     let tglAsli = row.tanggal || "2000-01-01";
                     let parts = tglAsli.split('-');
                     let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : tglAsli;
                     
+                    // 🔥 MESIN PENGHITUNG DEADLINE 15 HARI
+                    let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
+                    dTrx.setHours(0, 0, 0, 0);
+                    
+                    let jtDate = new Date(dTrx);
+                    jtDate.setDate(jtDate.getDate() + 15); // Batas aman +15 Hari
+                    
+                    let telatNih = hariIni > jtDate; // Cek apakah hari ini sudah melebihi deadline
+                    let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear();
+
                     if (!serverData[r].dates[tglFormated]) {
                         serverData[r].dates[tglFormated] = {
                             isLokal: false,
@@ -4798,21 +4809,17 @@ async function prosesAntreanBackground() {
                             tagihan: 0,
                             dp: 0,
                             sisaNyata: 0,
-                            jt: row.jatuh_tempo || '', // Opsional jika nanti ditambah
-                            isTelat: row.is_telat || false,
+                            jt: jtString, 
+                            isTelat: telatNih,
                             items: []
                         };
                     }
 
-                    // HITUNGAN MANUAL DARI KOLOM SUPABASE
                     let nominalRow = (parseFloat(row.qty) || 0) * (parseFloat(row.harga_satuan) || 0);
                     
-                    // Kalau ini adalah pembayaran (Cashflow)
                     if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
                         serverData[r].dates[tglFormated].dp += nominalRow;
-                        // Pembayaran kita anggap minus di tagihan untuk menyeimbangkan
                     } else {
-                        // Kalau ini DO Pakan (Penjualan)
                         serverData[r].dates[tglFormated].tagihan += nominalRow;
                         serverData[r].dates[tglFormated].items.push({
                             pakan: row.pakan_kategori || 'Pakan',
@@ -4823,17 +4830,14 @@ async function prosesAntreanBackground() {
                     }
                 });
 
-                // Kalkulasi Sisa Nyata & Total Piutang per Konsumen
+                // Kalkulasi Sisa Nyata & Pengelompokan Sehat/Telat
                 for (let r in serverData) {
                     for (let d in serverData[r].dates) {
                         let dateObj = serverData[r].dates[d];
-                        // Sisa Tagihan = Tagihan - DP
                         dateObj.sisaNyata = dateObj.tagihan - dateObj.dp;
                         
-                        // Bersihkan hari yang lunas / minus dari hitungan total jika perlu,
-                        // Tapi saat ini PWA menghitung semuanya sebagai Saldo Gabungan
+                        // Hitung total ke keranjang yang sesuai (Sehat / Telat)
                         serverData[r].total += dateObj.sisaNyata;
-                        
                         if (dateObj.isTelat) {
                             serverData[r].totalTelat += dateObj.sisaNyata;
                         } else {
@@ -4865,9 +4869,20 @@ async function prosesAntreanBackground() {
                         if (localData[r].dates[d].isLokal) {
                             let parts = String(d).split('/');
                             let normalizedDate = d;
+                            let telatNih = false;
+                            let jtString = "";
+
                             if (parts.length === 3) {
                                 let fullYear = parts[2].length === 2 ? "20" + parts[2] : parts[2];
                                 normalizedDate = `${parts[0]}/${parts[1]}/${fullYear}`;
+                                
+                                let dTrx = new Date(fullYear, parts[1] - 1, parts[0]);
+                                dTrx.setHours(0, 0, 0, 0);
+                                let jtDate = new Date(dTrx);
+                                jtDate.setDate(jtDate.getDate() + 15);
+                                
+                                telatNih = hariIni > jtDate;
+                                jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear();
                             }
 
                             if (!serverData[r]) serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: localData[r].alamat, dates: {} };
@@ -4875,8 +4890,14 @@ async function prosesAntreanBackground() {
                             if (serverData[r].dates[normalizedDate] || serverData[r].dates[d]) {
                                 continue; 
                             } else {
+                                localData[r].dates[d].isTelat = telatNih;
+                                localData[r].dates[d].jt = jtString;
                                 serverData[r].dates[d] = localData[r].dates[d];
-                                serverData[r].total += localData[r].dates[d].sisaNyata || localData[r].dates[d].tagihan;
+                                
+                                let sisaBaru = localData[r].dates[d].sisaNyata !== undefined ? localData[r].dates[d].sisaNyata : localData[r].dates[d].tagihan;
+                                serverData[r].total += sisaBaru;
+                                if (telatNih) serverData[r].totalTelat += sisaBaru;
+                                else serverData[r].totalSehat += sisaBaru;
                             }
                         }
                     }
