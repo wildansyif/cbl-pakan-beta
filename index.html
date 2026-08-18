@@ -7492,6 +7492,65 @@ async function prosesAntreanBackground() {
         window.isEStatementLoaded = false;
         window.isFetchingEStatement = false;
 
+        // ============================================
+        // MESIN PENGOLAH DATA E-STATEMENT DARI SUPABASE
+        // ============================================
+        function olahDataEStatement(dataSupabase, tahunTarget) {
+            let saldoAwal = 0, totalTagihan = 0, totalBayar = 0;
+            let groupBulanTgl = {};
+            
+            dataSupabase.forEach(row => {
+                let tglObj = new Date(row.tanggal);
+                let rTahun = tglObj.getFullYear();
+                let isBayar = row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar");
+                let nom = parseFloat(row.nominal) || parseFloat(row.tagihan) || parseFloat(row.pembayaran) || 0;
+                
+                // Saldo Awal = Sisa hutang dari tahun-tahun sebelumnya
+                if (rTahun < tahunTarget) {
+                    saldoAwal += isBayar ? -nom : nom;
+                } else if (rTahun === parseInt(tahunTarget)) {
+                    let key = row.tanggal + "_" + (isBayar ? "BAYAR" : "DO");
+                    if(!groupBulanTgl[key]) {
+                        groupBulanTgl[key] = {
+                            tglObj: tglObj,
+                            bulan: tglObj.getMonth(),
+                            tglStr: ("0" + tglObj.getDate()).slice(-2) + "/" + ("0" + (tglObj.getMonth() + 1)).slice(-2) + "/" + rTahun.toString().substring(2),
+                            jenis: isBayar ? "BAYAR" : "DO",
+                            tagihan: 0, bayar: 0, items: [], ongkir: 0,
+                            metode: isBayar ? (row.metode || "Cash") : "",
+                        };
+                    }
+                    
+                    if(isBayar) {
+                        groupBulanTgl[key].bayar += nom;
+                    } else {
+                        groupBulanTgl[key].tagihan += nom;
+                        let pkn = row.pakan_kategori || 'Pakan';
+                        if (pkn.toLowerCase().includes("ongkir")) {
+                            groupBulanTgl[key].ongkir += nom;
+                        } else {
+                            groupBulanTgl[key].items.push({ pakan: pkn, qty: parseFloat(row.qty)||0, harga: parseFloat(row.harga_satuan)||0 });
+                        }
+                    }
+                }
+            });
+
+            let mutasiAkhir = [];
+            let runningSaldo = saldoAwal;
+            let sortedKeys = Object.values(groupBulanTgl).sort((a,b) => a.tglObj - b.tglObj);
+            
+            sortedKeys.forEach(g => {
+                totalTagihan += g.tagihan;
+                totalBayar += g.bayar;
+                runningSaldo += (g.tagihan - g.bayar);
+                g.saldo = runningSaldo;
+                g.statusTagihan = "TERCATAT"; // Stempel standar Buku Tabungan
+                mutasiAkhir.push(g);
+            });
+
+            return { saldoAwal: saldoAwal, totalTagihan: totalTagihan, totalBayar: totalBayar, saldoAkhir: runningSaldo, mutasi: mutasiAkhir };
+        }
+
         function fetchPreviewEStatement(isPreload = false) {
             let namaKonsumen = document.getElementById('analytics_relasi').value.trim();
             if (!namaKonsumen) return;
@@ -7502,22 +7561,31 @@ async function prosesAntreanBackground() {
             let targetContainer = document.getElementById('tabel-preview-estatement');
 
             if (!isPreload) {
-                targetContainer.innerHTML = '<div style="text-align:center; padding:20px; font-size:12px; color:#8AA624;"><span class="material-symbols-outlined icon-spin" style="font-size:18px; vertical-align:middle;">sync</span> Menarik riwayat 3 bulan terakhir...</div>';
+                targetContainer.innerHTML = '<div style="text-align:center; padding:20px; font-size:12px; color:#8AA624;"><span class="material-symbols-outlined icon-spin" style="font-size:18px; vertical-align:middle;">sync</span> Menarik riwayat E-Statement...</div>';
             }
 
-            fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({ source: 'tarik_estatement', nama: namaKonsumen, tahun: new Date().getFullYear(), isPreview: true })
-            })
-                .then(res => res.json())
-                .then(res => {
-                    window.isFetchingEStatement = false;
-                    if (res.status === 'success') {
-                        window.isEStatementLoaded = true;
-                        let nf = new Intl.NumberFormat('id-ID');
-                        let data = res.data;
+            let tahunPilihan = new Date().getFullYear();
 
-                        let html = `
+            // 🚀 TEMBAK LANGSUNG KE SUPABASE!
+            fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaKonsumen)}&order=tanggal.asc`, {
+                headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
+            })
+            .then(r => r.json())
+            .then(resData => {
+                window.isFetchingEStatement = false;
+                window.isEStatementLoaded = true;
+
+                if (resData.error) {
+                    targetContainer.innerHTML = '<div style="text-align:center; padding:20px; color:red; font-weight:bold;">❌ Gagal menarik data E-Statement.</div>';
+                    return;
+                }
+
+                // Masukkan data mentah ke Mesin Pengolah
+                let data = olahDataEStatement(resData, tahunPilihan);
+                let nf = new Intl.NumberFormat('id-ID');
+                let namaBulan = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+                let html = `
             <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
                 <thead>
                     <tr style="background:#e2e8f0; color:#1e3a8a; border-bottom: 2px solid #DBE4C9;">
@@ -7530,11 +7598,11 @@ async function prosesAntreanBackground() {
                 <tbody>
             `;
 
-                        html += `
+                html += `
                 <tr style="background-color: #f1f5f9; font-weight: bold; border-bottom: 1px solid #ccc;">
                     <td style="padding:8px 4px; text-align:center;">-</td>
                     <td style="padding:8px 4px;">
-                        <span style="color:#1e3a8a;">SALDO BAWAAN PERIODE</span><br>
+                        <span style="color:#1e3a8a;">SALDO AWAL TAHUN</span><br>
                         <span style="font-size:9px; color:#666; font-weight:normal; display:block; margin-top:2px; line-height:1.3;">
                             • Akumulasi Tagihan YTD: Rp ${nf.format(data.totalTagihan)}<br>
                             • Total Pembayaran YTD: Rp ${nf.format(data.totalBayar)}
@@ -7545,54 +7613,43 @@ async function prosesAntreanBackground() {
                 </tr>
             `;
 
-                        if (data.mutasi.length === 0) {
-                            html += `<tr><td colspan="4" style="padding:15px; text-align:center; color:#888; font-style:italic;">Tidak ada mutasi transaksi dalam 3 bulan terakhir.</td></tr>`;
-                        } else {
-                            let currentMonth = -1;
-                            let subTagihan = 0, subBayar = 0;
+                if (data.mutasi.length === 0) {
+                    html += `<tr><td colspan="4" style="padding:15px; text-align:center; color:#888; font-style:italic;">Tidak ada mutasi transaksi dalam tahun ini.</td></tr>`;
+                } else {
+                    let currentMonth = -1;
+                    let subTagihan = 0, subBayar = 0;
 
-                            data.mutasi.forEach((m, index) => {
-                                if (currentMonth !== -1 && m.bulan !== currentMonth) {
-                                    html += `
+                    data.mutasi.forEach((m, index) => {
+                        if (currentMonth !== -1 && m.bulan !== currentMonth) {
+                            html += `
                             <tr style="background-color: #e2e8f0; text-align: center; font-weight: bold;">
                                 <td colspan="4" style="padding:8px;">
-                                    --- REKAPITULASI ${['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'][currentMonth].toUpperCase()} --- <br>
+                                    --- REKAPITULASI ${namaBulan[currentMonth].toUpperCase()} --- <br>
                                     <span style="font-size: 10px; font-weight: normal; color:#333;">
                                     Tagihan: Rp ${nf.format(subTagihan)} | Bayar: Rp ${nf.format(subBayar)} | Saldo: Rp ${nf.format(data.mutasi[index - 1].saldo)}
                                     </span>
                                 </td>
                             </tr>
                         `;
-                                    subTagihan = 0; subBayar = 0;
-                                }
+                            subTagihan = 0; subBayar = 0;
+                        }
 
-                                currentMonth = m.bulan;
-                                let barisHtml = '';
+                        currentMonth = m.bulan;
+                        let barisHtml = '';
 
-                                if (m.jenis === 'DO') {
-                                    subTagihan += m.tagihan;
+                        if (m.jenis === 'DO') {
+                            subTagihan += m.tagihan;
+                            let ketPakan = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;"><b>Pengambilan Pakan:</b> <span style="background:#e8f0d8; color:#8AA624; padding:2px 6px; border-radius:4px; font-size:9px; border:1px solid #c8e6c9;">TERCATAT</span></div>`;
 
-                                    // LOGIKA STEMPEL MENGGUNAKAN TEKS ASLI DATABASE
-                                    let badgeStatus = "";
-                                    let statUpper = (m.statusTagihan || "BELUM LUNAS").toUpperCase();
+                            if (m.items && m.items.length > 0) {
+                                m.items.forEach(it => {
+                                    let hargaSatuanStr = it.harga > 0 ? nf.format(it.harga) : nf.format(m.tagihan / (it.qty || 1));
+                                    ketPakan += `<span style="color:#555;">• ${it.pakan} (${it.qty} Kg x @${hargaSatuanStr})</span><br>`;
+                                });
+                            }
+                            let ketOngkir = m.ongkir > 0 ? `<br><span style="color:#e65100; font-size:10px;">+ Ongkir / Lainnya: Rp ${nf.format(m.ongkir)}</span>` : '';
 
-                                    if (statUpper === 'LUNAS') {
-                                        badgeStatus = `<span style="background:#e8f5e9; color:#2e7d32; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold; border:1px solid #c8e6c9;">LUNAS</span>`;
-                                    } else {
-                                        badgeStatus = `<span style="background:#fff3e0; color:#e65100; padding:2px 6px; border-radius:4px; font-size:9px; font-weight:bold; border:1px solid #ffe0b2;">${statUpper}</span>`;
-                                    }
-
-                                    let ketPakan = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;"><b>Pengambilan Pakan:</b> ${badgeStatus}</div>`;
-
-                                    if (m.items && m.items.length > 0) {
-                                        m.items.forEach(it => {
-                                            let hargaSatuanStr = it.harga > 0 ? nf.format(it.harga) : nf.format(m.tagihan / (it.qty || 1));
-                                            ketPakan += `<span style="color:#555;">• ${it.pakan} (${it.qty} Kg x @${hargaSatuanStr})</span><br>`;
-                                        });
-                                    }
-                                    let ketOngkir = m.ongkir > 0 ? `<br><span style="color:#e65100; font-size:10px;">+ Ongkir Pengiriman: Rp ${nf.format(m.ongkir)}</span>` : '';
-
-                                    barisHtml = `
+                            barisHtml = `
                             <tr style="border-bottom: 1px solid #eee; background: #fff; vertical-align: top;">
                                 <td style="text-align: center; padding: 6px; color:#666;">${m.tglStr.substring(0, 5)}</td>
                                 <td style="line-height: 1.4; padding: 6px;">
@@ -7602,57 +7659,11 @@ async function prosesAntreanBackground() {
                                 <td style="text-align: right; font-weight: bold; padding: 6px; color:#333; background:#fafafa;">${nf.format(m.saldo)}</td>
                             </tr>
                         `;
-                                } else if (m.jenis === 'BAYAR') {
-                                    subBayar += m.bayar;
+                        } else if (m.jenis === 'BAYAR') {
+                            subBayar += m.bayar;
+                            let ketHtml = `<b style="color:#15803d; font-size:11px;">Pembayaran (${m.metode || "Cash"})</b>`;
 
-                                    let rawText = m.metode || "Pembayaran";
-                                    let rincianPart = rawText;
-                                    let rekapPart = "";
-                                    let metodeName = "Cash";
-                                    let totalTagihan = "-";
-                                    let sisaTagihan = "-";
-
-                                    if (rawText.includes('---')) {
-                                        let splits = rawText.split('---');
-                                        rincianPart = splits[0].trim();
-                                        rekapPart = splits[1].trim();
-
-                                        let tglRegex = /Tgl (\d{2}\/\d{2}\/\d{2})/g;
-                                        let foundDates = [];
-                                        let matchRegex;
-                                        while ((matchRegex = tglRegex.exec(rincianPart)) !== null) {
-                                            foundDates.push(matchRegex[1]);
-                                        }
-                                        let periodeStr = "";
-                                        if (foundDates.length > 0) {
-                                            let firstTgl = foundDates[0];
-                                            let lastTgl = foundDates[foundDates.length - 1];
-                                            periodeStr = (firstTgl === lastTgl) ? `(Periode ${firstTgl})` : `(Periode ${firstTgl} - ${lastTgl})`;
-                                        }
-
-                                        let lines = rekapPart.split('\n');
-                                        lines.forEach(l => {
-                                            if (l.includes('Total Tagihan:')) {
-                                                totalTagihan = l.replace('Total Tagihan:', '').trim();
-                                                if (periodeStr) totalTagihan += ` <span style="font-weight:normal; font-size:9px; color:#888;">${periodeStr}</span>`;
-                                            }
-                                            else if (l.includes('Nominal Masuk') || l.includes('Potong Saldo')) {
-                                                let matchMetode = l.match(/\((.*?)\)/);
-                                                if (matchMetode) metodeName = matchMetode[1];
-                                            }
-                                            else if (l.includes('Sisa Tagihan:')) sisaTagihan = l.replace('Sisa Tagihan:', '').trim();
-                                        });
-                                    }
-
-                                    let ketHtml = `<b style="color:#15803d; font-size:11px;">Pembayaran (${metodeName})</b><br>`;
-                                    ketHtml += `<span style="font-size:9px; color:#555;">`;
-                                    ketHtml += `Total Tagihan: <b style="color:#333;">${totalTagihan}</b><br>`;
-                                    ketHtml += `Sisa Tagihan: <b style="color:#b91c1c;">${sisaTagihan}</b><br><br>`;
-                                    ketHtml += `<i style="color:#888;">Rincian:</i><br>`;
-                                    ketHtml += `<span style="line-height:1.4;">${rincianPart.replace(/\n/g, '<br>')}</span>`;
-                                    ketHtml += `</span>`;
-
-                                    barisHtml = `
+                            barisHtml = `
                             <tr style="border-bottom: 1px solid #eee; background: #f8fafc; vertical-align: top;">
                                 <td style="text-align: center; padding: 6px; color:#666;">${m.tglStr.substring(0, 5)}</td>
                                 <td style="padding: 6px;">${ketHtml}</td>
@@ -7660,44 +7671,29 @@ async function prosesAntreanBackground() {
                                 <td style="text-align: right; font-weight: bold; padding: 6px; color:#333; background:#fafafa;">${nf.format(m.saldo)}</td>
                             </tr>
                         `;
-                                }
-                                html += barisHtml;
-                            });
+                        }
+                        html += barisHtml;
+                    });
 
-                            if (currentMonth !== -1 && data.mutasi.length > 0) {
-                                html += `
+                    if (currentMonth !== -1 && data.mutasi.length > 0) {
+                        html += `
                         <tr style="background-color: #e2e8f0; text-align: center; font-weight: bold;">
                             <td colspan="4" style="padding:8px;">
-                                --- REKAPITULASI ${['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'][currentMonth].toUpperCase()} --- <br>
+                                --- REKAPITULASI ${namaBulan[currentMonth].toUpperCase()} --- <br>
                                 <span style="font-size: 10px; font-weight: normal; color:#333;">
                                 Tagihan: Rp ${nf.format(subTagihan)} | Bayar: Rp ${nf.format(subBayar)} | Saldo Akhir: Rp ${nf.format(data.mutasi[data.mutasi.length - 1].saldo)}
                                 </span>
                             </td>
                         </tr>
                     `;
-                            }
-                        }
-                        html += `</tbody></table>`;
-                        targetContainer.innerHTML = html;
-                    } else {
-                        targetContainer.innerHTML = '<div style="text-align:center; padding:20px; color:red; font-weight:bold;">❌ Gagal menarik data E-Statement.</div>';
                     }
-                }).catch(err => {
-                    window.isFetchingEStatement = false;
-                    targetContainer.innerHTML = '<div style="text-align:center; padding:20px; color:red; font-weight:bold;">⚠️ Gangguan jaringan atau server.</div>';
-                });
-        }
-
-        // ============================================
-        // FUNGSI TARIK DATA & RENDER PDF E-STATEMENT
-        // ============================================
-        function pilihTahunCetakES() {
-            // Ambil tahun langsung dari dropdown, tidak pakai prompt lagi
-            let tahunPilihan = document.getElementById('pilihan-tahun-es').value;
-
-            if (tahunPilihan) {
-                cetakEStatement(tahunPilihan);
-            }
+                }
+                html += `</tbody></table>`;
+                targetContainer.innerHTML = html;
+            }).catch(err => {
+                window.isFetchingEStatement = false;
+                targetContainer.innerHTML = '<div style="text-align:center; padding:20px; color:red; font-weight:bold;">⚠️ Gangguan jaringan atau server.</div>';
+            });
         }
 
         function cetakEStatement(tahunPilihan) {
@@ -7709,26 +7705,26 @@ async function prosesAntreanBackground() {
             btn.innerHTML = '<span class="material-symbols-outlined icon-spin" style="font-size:14px;">sync</span> <span style="font-size:10px; font-weight:bold;">Merakit...</span>';
             btn.style.pointerEvents = 'none';
 
-            fetch(API_URL, {
-                method: 'POST',
-                // MELEMPAR PAYLOAD TAHUN KE BACKEND
-                body: JSON.stringify({ source: 'tarik_estatement', nama: namaKonsumen, tahun: tahunPilihan })
+            // 🚀 TEMBAK LANGSUNG KE SUPABASE UNTUK CETAK PDF!
+            fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaKonsumen)}&order=tanggal.asc`, {
+                headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
             })
-                .then(res => res.json())
-                .then(res => {
-                    if (res.status === 'success') {
-                        prosesDanDownloadPDF(res.data, namaKonsumen, tahunPilihan);
-                    } else {
-                        alert('Gagal mengambil data: ' + res.message);
-                    }
-                })
-                .catch(err => {
-                    alert('Terjadi kesalahan koneksi saat merakit E-Statement.');
-                })
-                .finally(() => {
-                    btn.innerHTML = originalText;
-                    btn.style.pointerEvents = 'auto';
-                });
+            .then(r => r.json())
+            .then(resData => {
+                if (resData.error) {
+                    alert('Gagal mengambil data: ' + resData.message);
+                } else {
+                    let processedData = olahDataEStatement(resData, tahunPilihan);
+                    prosesDanDownloadPDF(processedData, namaKonsumen, tahunPilihan); // Fungsi render PDF yang di bawahnya dibiarkan sama
+                }
+            })
+            .catch(err => {
+                alert('Terjadi kesalahan koneksi saat merakit E-Statement.');
+            })
+            .finally(() => {
+                btn.innerHTML = originalText;
+                btn.style.pointerEvents = 'auto';
+            });
         }
 
         function prosesDanDownloadPDF(data, namaKonsumen, tahunPilihan) {
