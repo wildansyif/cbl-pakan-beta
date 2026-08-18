@@ -7533,10 +7533,20 @@ async function prosesAntreanBackground() {
                     if (uangMasuk.sisaBayar <= 0) { indexBayar++; continue; }
                     let dipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
                     
+                    // 🔥 PERBAIKAN: OTAMATIS MENGHITUNG JEJAK MATEMATIKA
                     if (dipotong > 0) {
                         let tglParts = nota.tgl.split('-');
-                        let tglIndo = tglParts.length === 3 ? `${tglParts[2]}/${tglParts[1]}/${tglParts[0].substring(2)}` : nota.tgl;
-                        uangMasuk.detailPotongan.push({ tglNota: tglIndo, jumlah: dipotong });
+                        let tglIndo = tglParts.length === 3 ? `${tglParts[2]}/${tglParts[1]}/${tglParts[0]}` : nota.tgl;
+                        
+                        let sisaSetelahDipotong = sisaHutangNota - dipotong;
+                        let sisaSebelumDipotong = sisaHutangNota;
+                        
+                        uangMasuk.detailPotongan.push({ 
+                            tglNota: tglIndo, 
+                            hutangSblm: sisaSebelumDipotong, 
+                            jumlah: dipotong, 
+                            sisaAkhir: sisaSetelahDipotong 
+                        });
                     }
                     
                     nota.terbayar += dipotong;
@@ -7711,11 +7721,11 @@ async function prosesAntreanBackground() {
                             subBayar += m.bayar;
                             let ketHtml = `<b style="color:#15803d; font-size:11px;">Pembayaran (${m.metode || "Cash"})</b><br>`;
                             
-                            // 🔥 RINCIAN UANG MEMOTONG APA SAJA
                             if (m.detailPotongan && m.detailPotongan.length > 0) {
                                 ketHtml += `<span style="font-size:9px; color:#555; line-height:1.4;"><i>Memotong:</i><br>`;
                                 m.detailPotongan.forEach(pot => {
-                                    ketHtml += `• Nota tgl ${pot.tglNota} : Rp ${nf.format(pot.jumlah)}<br>`;
+                                    let sisaHtml = pot.sisaAkhir <= 0 ? `<b style="color:#8AA624;">Rp 0 (LUNAS)</b>` : `<b style="color:#c62828;">Rp ${nf.format(pot.sisaAkhir)}</b>`;
+                                    ketHtml += `<span style="display:inline-block; margin-top:2px;">• Nota tgl ${pot.tglNota} : (Rp ${nf.format(pot.hutangSblm)}) - (Masuk Rp ${nf.format(pot.jumlah)}) = Sisa ${sisaHtml}</span><br>`;
                                 });
                                 ketHtml += `</span>`;
                             }
@@ -7755,6 +7765,13 @@ async function prosesAntreanBackground() {
                 window.isFetchingEStatement = false;
                 targetContainer.innerHTML = '<div style="text-align:center; padding:20px; color:red; font-weight:bold;">⚠️ Gangguan jaringan atau server.</div>';
             });
+        }
+        
+        function pilihTahunCetakES() {
+            let tahunPilihan = document.getElementById('pilihan-tahun-es').value;
+            if (tahunPilihan) {
+                cetakEStatement(tahunPilihan);
+            }
         }
 
         function cetakEStatement(tahunPilihan) {
@@ -7863,7 +7880,8 @@ async function prosesAntreanBackground() {
                     if (m.detailPotongan && m.detailPotongan.length > 0) {
                         ketHtml += `<span style="font-size:9px; color:#555; line-height:1.4;"><i>Memotong:</i><br>`;
                         m.detailPotongan.forEach(pot => {
-                            ketHtml += `• Nota tgl ${pot.tglNota} : Rp ${nf.format(pot.jumlah)}<br>`;
+                            let sisaHtml = pot.sisaAkhir <= 0 ? `<b style="color:#8AA624;">Rp 0 (LUNAS)</b>` : `<b style="color:#c62828;">Rp ${nf.format(pot.sisaAkhir)}</b>`;
+                            ketHtml += `<span style="display:inline-block; margin-top:2px;">• Nota tgl ${pot.tglNota} : (Rp ${nf.format(pot.hutangSblm)}) - (Masuk Rp ${nf.format(pot.jumlah)}) = Sisa ${sisaHtml}</span><br>`;
                         });
                         ketHtml += `</span>`;
                     }
