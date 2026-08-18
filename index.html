@@ -4844,11 +4844,16 @@ async function prosesAntreanBackground() {
 
                             let jumlahDipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
                             
-                            // 🔥 DETEKTIF BEKERJA: CATAT JEJAK PEMOTONGAN!
+                            // 🔥 DETEKTIF BEKERJA: CATAT JEJAK MATEMATIKA
                             if (jumlahDipotong > 0) {
+                                let sisaSetelahDipotong = sisaHutangNota - jumlahDipotong;
+                                let sisaSebelumDipotong = sisaHutangNota; // Hutang sblm disiram uang ini
+                                
                                 uangMasuk.detailPotongan.push({
                                     tglNota: nota.tgl,
-                                    jumlah: jumlahDipotong
+                                    hutangSblm: sisaSebelumDipotong,
+                                    jumlah: jumlahDipotong,
+                                    sisaAkhir: sisaSetelahDipotong
                                 });
                             }
 
@@ -4918,14 +4923,20 @@ async function prosesAntreanBackground() {
                             ketText += `<i style="color:#888;">Uang ini dipakai untuk memotong:</i><br>`;
                             byr.detailPotongan.forEach(pot => {
                                 let nParts = pot.tglNota.split('-');
-                                let nTglStr = nParts.length === 3 ? `${nParts[2]}/${nParts[1]}/${nParts[0].substring(2)}` : pot.tglNota;
-                                ketText += `<span style="color:#555;">• Nota Tgl ${nTglStr} : <b>Rp ${nf.format(pot.jumlah)}</b></span><br>`;
+                                let nTglStr = nParts.length === 3 ? `${nParts[2]}/${nParts[1]}/${nParts[0]}` : pot.tglNota;
+                                
+                                // 🔥 FORMAT MATEMATIKA SESUAI REQUEST
+                                let sisaHtml = pot.sisaAkhir <= 0 
+                                    ? `<b style="color:#8AA624;">Rp 0 (LUNAS)</b>` 
+                                    : `<b style="color:#c62828;">Rp ${nf.format(pot.sisaAkhir)}</b>`;
+                                    
+                                ketText += `<span style="color:#555; display:inline-block; margin-top:2px;">• Nota tgl ${nTglStr} : (Rp ${nf.format(pot.hutangSblm)}) - (Masuk Rp ${nf.format(pot.jumlah)}) = Sisa ${sisaHtml}</span><br>`;
                             });
                         }
                         
                         // Cek apakah ada sisa uang yang belum kepakai
                         if (byr.sisaBayar > 0) {
-                            ketText += `<span style="color:#8AA624; font-weight:bold;">• Sisa Uang / Deposit : Rp ${nf.format(byr.sisaBayar)}</span><br>`;
+                            ketText += `<span style="color:#8AA624; font-weight:bold; display:inline-block; margin-top:4px;">• Sisa Uang / Deposit : Rp ${nf.format(byr.sisaBayar)}</span><br>`;
                         }
 
                         if (ketText === '') {
