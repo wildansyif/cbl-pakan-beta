@@ -6917,7 +6917,7 @@ async function prosesAntreanBackground() {
                 document.getElementById('lbl_telat').innerText = Math.round(pctTelat) + "%";
                 document.getElementById('lbl_nm_telat').innerText = "Rp " + nf.format(d.keuangan.piutangTelat);
 
-                // PIUTANG AKTIF DENGAN KETERANGAN DP
+                // PIUTANG AKTIF DENGAN KETERANGAN DP & ONGKIR
                 let htmlPiutang = "";
                 if (d.piutangAktif && d.piutangAktif.length > 0) {
                     d.piutangAktif.forEach((p, idx) => {
@@ -6973,16 +6973,17 @@ async function prosesAntreanBackground() {
                 titlePiutang.style.justifyContent = "space-between";
                 titlePiutang.innerHTML = `<div style="display:flex; align-items:center; gap:5px;"><span class="material-symbols-outlined" style="font-size:18px;">shopping_cart</span> Piutang Aktif</div> <div style="color:#c62828; font-size:15px;">Rp ${nf.format(totalSemuaPiutang)}</div>`;
 
+                // 🔥 PERUBAHAN: Riwayat Pembayaran Selalu Terbuka & Jelas!
                 let htmlBayar = "";
                 if (d.riwayatBayar && d.riwayatBayar.length > 0) {
                     d.riwayatBayar.forEach((b, idx) => {
                         htmlBayar += `
-                          <div class="rank-item" style="border-left-color:#8AA624; display:block; cursor:pointer;" onclick="document.getElementById('det-bayar-${idx}').classList.toggle('hidden')">
-                              <div style="display:flex; justify-content:space-between;">
-                                  <div><span style="font-weight:bold;">Tgl Bayar: ${b.tgl}</span><div style="font-size:10px; color:#888;">Klik untuk lihat rincian ▾</div></div>
-                                  <strong style="color:#8AA624;">+ Rp ${nf.format(b.nominal)}</strong>
+                          <div class="rank-item" style="border-left-color:#8AA624; display:block;">
+                              <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #DBE4C9; padding-bottom:6px; margin-bottom:6px;">
+                                  <span style="font-weight:bold; color:#1a5c40;">Tgl Bayar: ${b.tgl}</span>
+                                  <strong style="color:#8AA624; font-size:13px;">+ Rp ${nf.format(b.nominal)}</strong>
                               </div>
-                              <div id="det-bayar-${idx}" class="hidden" style="margin-top:10px; padding-top:10px; border-top:1px dashed #ccc; font-size:11px; color:#555;">
+                              <div style="font-size:11px; color:#555; line-height:1.5;">
                                   ${b.ket}
                               </div>
                           </div>`;
@@ -7006,7 +7007,6 @@ async function prosesAntreanBackground() {
             if (!navigator.onLine) { if (!savedData) alert("Fitur Analitik wajib menggunakan koneksi internet!"); return; }
             document.getElementById('analytics-loader').classList.remove('hidden');
 
-            // 🚀 TEMBAK KE SUPABASE (PROFIL & TRANSAKSI)
             Promise.all([
                 fetch(`${SUPA_URL}/rest/v1/master_relasi?nama=eq.${encodeURIComponent(namaRelasi)}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
                 fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaRelasi)}&order=tanggal.asc`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
@@ -7015,14 +7015,12 @@ async function prosesAntreanBackground() {
                 document.getElementById('analytics-loader').classList.add('hidden');
                 if (mutasiData.error) throw new Error(mutasiData.message);
 
-                // 1. OLAH DATA PROFIL
                 let profilText = "- - Umum";
                 if (profilData && profilData.length > 0) {
                     let p = profilData[0];
                     profilText = `${p.kategori || 'Umum'} ${p.alamat ? '- ' + p.alamat : ''}`;
                 }
 
-                // 2. PISAHKAN DATA TRANSAKSI
                 let tagihanArr = [];
                 let bayarArr = [];
                 let totalQty = 0;
@@ -7058,7 +7056,6 @@ async function prosesAntreanBackground() {
                     }
                 });
 
-                // 3. JALANKAN MESIN FIFO SMART SWEEP
                 let keuangan = { totalPiutang: 0, piutangSehat: 0, piutangTelat: 0 };
                 let piutangAktif = [];
                 let riwayatBayar = [];
@@ -7081,7 +7078,6 @@ async function prosesAntreanBackground() {
                         if (uangMasuk.sisaBayar <= 0) { indexBayar++; continue; }
                         let dipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
                         
-                        // 🔥 CATAT JEJAK MATEMATIKA
                         if (dipotong > 0) {
                             uangMasuk.detailPotongan.push({ 
                                 tglNota: nota.tgl, hutangSblm: sisaHutangNota, jumlah: dipotong, sisaAkhir: sisaHutangNota - dipotong 
@@ -7103,9 +7099,19 @@ async function prosesAntreanBackground() {
                         let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
                         dTrx.setHours(0, 0, 0, 0);
                         let jtDate = new Date(dTrx); jtDate.setDate(jtDate.getDate() + 15);
-                        let telatNih = hariIni > jtDate;
-                        let selisihHari = Math.ceil((hariIni - jtDate) / (1000 * 60 * 60 * 24));
-                        let statusTxt = telatNih ? `Terlambat ${selisihHari} Hari` : "Belum Jatuh Tempo";
+                        
+                        // 🔥 PERUBAHAN: Logika H-x & Jatuh Tempo
+                        let selisihHari = Math.ceil((jtDate.getTime() - hariIni.getTime()) / (1000 * 60 * 60 * 24));
+                        let telatNih = selisihHari < 0;
+                        
+                        let statusTxt = "";
+                        if (selisihHari < 0) {
+                            statusTxt = `Terlambat ${Math.abs(selisihHari)} Hari`;
+                        } else if (selisihHari === 0) {
+                            statusTxt = "Jatuh Tempo Hari Ini";
+                        } else {
+                            statusTxt = `Jatuh Tempo H-${selisihHari}`;
+                        }
 
                         piutangAktif.push({
                             tgl: tglFormated, status: statusTxt, total: sisaNyata, tagihan: nota.totalTagihan, dp: nota.terbayar, items: nota.items
@@ -7120,7 +7126,7 @@ async function prosesAntreanBackground() {
                 let riwayatTerbalik = [...bayarArr].reverse().slice(0, 10);
                 riwayatTerbalik.forEach(byr => {
                     let bParts = byr.tgl.split('-');
-                    let bTglStr = bParts.length === 3 ? `${bParts[2]}/${bParts[1]}/${bParts[0].substring(2)}` : byr.tgl;
+                    let bTglStr = bParts.length === 3 ? `${bParts[2]}/${bParts[1]}/${bParts[0]}` : byr.tgl;
                     let ketText = ``;
                     if (byr.detailPotongan.length > 0) {
                         ketText += `<i style="color:#888;">Uang ini dipakai untuk memotong:</i><br>`;
@@ -7162,7 +7168,6 @@ async function prosesAntreanBackground() {
                 localStorage.setItem(cacheKey, JSON.stringify(finalData));
                 renderAnalisaData(finalData);
 
-                // Preload E-Statement
                 setTimeout(() => { fetchPreviewEStatement(true); }, 1000);
 
             })
@@ -7639,7 +7644,7 @@ async function prosesAntreanBackground() {
 
                         if (m.jenis === 'DO') {
                             subTagihan += m.tagihan;
-                            let ketPakan = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;"><b>Pengambilan Pakan:</b> <span style="background:#e8f0d8; color:#8AA624; padding:2px 6px; border-radius:4px; font-size:9px; border:1px solid #c8e6c9;">TERCATAT</span></div>`;
+                            let ketPakan = `<div style="margin-bottom:4px; color:#1e3a8a;"><b>Pengambilan Pakan:</b></div>`;
 
                             if (m.items && m.items.length > 0) {
                                 m.items.forEach(it => {
@@ -7780,8 +7785,7 @@ async function prosesAntreanBackground() {
 
                 if (m.jenis === 'DO') {
                     subTagihan += m.tagihan;
-                    let statUpper = (m.statusTagihan || "BELUM LUNAS").toUpperCase();
-                    let txtStatus = (statUpper === 'LUNAS')
+                    let ketPakan = `<b>Pengambilan Pakan:</b><br>`;
                         ? '<b style="color:#15803d;">[LUNAS]</b>'
                         : `<b style="color:#e65100;">[${statUpper}]</b>`;
 
