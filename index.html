@@ -4775,74 +4775,131 @@ async function prosesAntreanBackground() {
                 }
                 if (!Array.isArray(data)) return;
 
-                // 🛠️ Menerjemahkan data Supabase menjadi Format PWA
+                // 🛠️ Menerjemahkan data Supabase & MENJALANKAN FIFO SMART SWEEP
                 let serverData = {};
                 let hariIni = new Date();
-                hariIni.setHours(0, 0, 0, 0); // Kunci jam di 00:00:00 agar hitungan akurat
-                
+                hariIni.setHours(0, 0, 0, 0);
+
+                // 1. PISAHKAN TAGIHAN DAN PEMBAYARAN PER KONSUMEN
+                let rawByRelasi = {};
+
                 data.forEach(row => {
                     let r = row.relasi;
-                    if (!r || r === "-") return; 
+                    if (!r || r === "-") return;
                     
-                    if (!serverData[r]) {
-                        serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: row.alamat || '-', dates: {} };
-                    }
-                    
-                    let tglAsli = row.tanggal || "2000-01-01";
-                    let parts = tglAsli.split('-');
-                    let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : tglAsli;
-                    
-                    // 🔥 MESIN PENGHITUNG DEADLINE 15 HARI
-                    let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
-                    dTrx.setHours(0, 0, 0, 0);
-                    
-                    let jtDate = new Date(dTrx);
-                    jtDate.setDate(jtDate.getDate() + 15); // Batas aman +15 Hari
-                    
-                    let telatNih = hariIni > jtDate; // Cek apakah hari ini sudah melebihi deadline
-                    let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear();
-
-                    if (!serverData[r].dates[tglFormated]) {
-                        serverData[r].dates[tglFormated] = {
-                            isLokal: false,
-                            tgl: tglFormated,
-                            tagihan: 0,
-                            dp: 0,
-                            sisaNyata: 0,
-                            jt: jtString, 
-                            isTelat: telatNih,
-                            items: []
-                        };
+                    if (!rawByRelasi[r]) {
+                        rawByRelasi[r] = { tagihan: [], bayar: [], alamat: row.alamat || '-' };
                     }
 
-                    let nominalRow = (parseFloat(row.qty) || 0) * (parseFloat(row.harga_satuan) || 0);
-                    
+                    // Amankan Nominal (Mencari dari berbagai kolom View Supabase)
+                    let nominal = parseFloat(row.nominal) || parseFloat(row.tagihan) || parseFloat(row.debet) || ((parseFloat(row.qty)||0) * (parseFloat(row.harga_satuan)||0)) || 0;
+
                     if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
-                        serverData[r].dates[tglFormated].dp += nominalRow;
+                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal });
                     } else {
-                        serverData[r].dates[tglFormated].tagihan += nominalRow;
-                        serverData[r].dates[tglFormated].items.push({
+                        rawByRelasi[r].tagihan.push({
+                            tgl: row.tanggal,
                             pakan: row.pakan_kategori || 'Pakan',
                             qty: parseFloat(row.qty) || 0,
                             satuan: row.satuan || 'Kg',
-                            nominal: nominalRow
+                            nominal: nominal,
+                            terbayar: 0 // Modal awal untuk dipotong uang masuk
                         });
                     }
                 });
 
-                // Kalkulasi Sisa Nyata & Pengelompokan Sehat/Telat
-                for (let r in serverData) {
-                    for (let d in serverData[r].dates) {
-                        let dateObj = serverData[r].dates[d];
-                        dateObj.sisaNyata = dateObj.tagihan - dateObj.dp;
-                        
-                        // Hitung total ke keranjang yang sesuai (Sehat / Telat)
-                        serverData[r].total += dateObj.sisaNyata;
-                        if (dateObj.isTelat) {
-                            serverData[r].totalTelat += dateObj.sisaNyata;
-                        } else {
-                            serverData[r].totalSehat += dateObj.sisaNyata;
+                // 2. MESIN SMART SWEEP (FIFO)
+                for (let r in rawByRelasi) {
+                    serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: rawByRelasi[r].alamat, dates: {} };
+
+                    // Urutkan dari yang tertua ke terbaru
+                    let listTagihan = rawByRelasi[r].tagihan.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+                    let listBayar = rawByRelasi[r].bayar.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+
+                    // A. Kumpulkan item pakan ke dalam nota per tanggal
+                    let groupedNota = {};
+                    listTagihan.forEach(item => {
+                        let tgl = item.tgl || "2000-01-01";
+                        if (!groupedNota[tgl]) {
+                            groupedNota[tgl] = { tgl: tgl, totalTagihan: 0, terbayar: 0, items: [] };
                         }
+                        groupedNota[tgl].totalTagihan += item.nominal;
+                        groupedNota[tgl].items.push(item);
+                    });
+
+                    let arrNota = Object.values(groupedNota).sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+
+                    // B. Eksekusi Potong Saldo Otomatis (The Real FIFO)
+                    let indexBayar = 0;
+                    for (let i = 0; i < arrNota.length; i++) {
+                        let nota = arrNota[i];
+                        let sisaHutangNota = nota.totalTagihan - nota.terbayar;
+
+                        while (sisaHutangNota > 0 && indexBayar < listBayar.length) {
+                            let uangMasuk = listBayar[indexBayar];
+                            if (uangMasuk.sisaBayar <= 0) {
+                                indexBayar++;
+                                continue;
+                            }
+
+                            let jumlahDipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
+                            nota.terbayar += jumlahDipotong;
+                            uangMasuk.sisaBayar -= jumlahDipotong;
+                            sisaHutangNota -= jumlahDipotong;
+
+                            if (uangMasuk.sisaBayar <= 0) indexBayar++;
+                        }
+                    }
+
+                    // C. Masukkan Nota yang MASIH NGUTANG ke tampilan PWA
+                    arrNota.forEach(nota => {
+                        let sisaNyata = nota.totalTagihan - nota.terbayar;
+
+                        // Tampilkan HANYA JIKA BELUM LUNAS
+                        if (sisaNyata > 0) {
+                            let parts = nota.tgl.split('-');
+                            let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : nota.tgl;
+
+                            // Kalkulator Deadline 15 Hari
+                            let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
+                            dTrx.setHours(0, 0, 0, 0);
+                            let jtDate = new Date(dTrx);
+                            jtDate.setDate(jtDate.getDate() + 15);
+                            
+                            let telatNih = hariIni > jtDate;
+                            let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear();
+
+                            serverData[r].dates[tglFormated] = {
+                                isLokal: false,
+                                tgl: tglFormated,
+                                tagihan: nota.totalTagihan,
+                                dp: nota.terbayar, // Ini yang bikin tulisan Ter-DP muncul!
+                                sisaNyata: sisaNyata,
+                                jt: jtString,
+                                isTelat: telatNih,
+                                items: nota.items
+                            };
+
+                            serverData[r].total += sisaNyata;
+                            if (telatNih) serverData[r].totalTelat += sisaNyata;
+                            else serverData[r].totalSehat += sisaNyata;
+                        }
+                    });
+
+                    // D. Cek apakah ada Uang Lebih (Deposit / Overpay)
+                    let sisaDeposit = 0;
+                    while(indexBayar < listBayar.length) {
+                        sisaDeposit += listBayar[indexBayar].sisaBayar;
+                        indexBayar++;
+                    }
+
+                    if (sisaDeposit > 0) {
+                        let tglDepo = ("0" + hariIni.getDate()).slice(-2) + "/" + ("0" + (hariIni.getMonth() + 1)).slice(-2) + "/" + hariIni.getFullYear();
+                        serverData[r].dates["DEPO-"+tglDepo] = {
+                            isLokal: false, tgl: tglDepo, tagihan: 0, dp: sisaDeposit, sisaNyata: -sisaDeposit, jt: "", isTelat: false,
+                            items: [{ pakan: "Deposit / Uang Lebih", qty: 0, satuan: "-", nominal: -sisaDeposit }]
+                        };
+                        serverData[r].total -= sisaDeposit;
                     }
                 }
 
