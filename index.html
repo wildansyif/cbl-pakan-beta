@@ -4791,11 +4791,11 @@ async function prosesAntreanBackground() {
                         rawByRelasi[r] = { tagihan: [], bayar: [], alamat: row.alamat || '-' };
                     }
 
-                    // Amankan Nominal (Mencari dari berbagai kolom View Supabase)
                     let nominal = parseFloat(row.nominal) || parseFloat(row.tagihan) || parseFloat(row.debet) || ((parseFloat(row.qty)||0) * (parseFloat(row.harga_satuan)||0)) || 0;
 
                     if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
-                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal });
+                        // 🔥 TAMBAHAN: Laci 'detailPotongan' untuk menyimpan jejak uang dipakai bayar apa saja
+                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [] });
                     } else {
                         rawByRelasi[r].tagihan.push({
                             tgl: row.tanggal,
@@ -4803,16 +4803,16 @@ async function prosesAntreanBackground() {
                             qty: parseFloat(row.qty) || 0,
                             satuan: row.satuan || 'Kg',
                             nominal: nominal,
-                            terbayar: 0 // Modal awal untuk dipotong uang masuk
+                            terbayar: 0
                         });
                     }
                 });
 
                 // 2. MESIN SMART SWEEP (FIFO)
                 for (let r in rawByRelasi) {
-                    serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: rawByRelasi[r].alamat, dates: {} };
+                    // 🔥 TAMBAHAN: Laci 'riwayat' dihidupkan kembali!
+                    serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: rawByRelasi[r].alamat, dates: {}, riwayat: [] };
 
-                    // Urutkan dari yang tertua ke terbaru
                     let listTagihan = rawByRelasi[r].tagihan.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
                     let listBayar = rawByRelasi[r].bayar.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
 
@@ -4829,7 +4829,7 @@ async function prosesAntreanBackground() {
 
                     let arrNota = Object.values(groupedNota).sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
 
-                    // B. Eksekusi Potong Saldo Otomatis (The Real FIFO)
+                    // B. Eksekusi Potong Saldo Otomatis & Catat Jejaknya
                     let indexBayar = 0;
                     for (let i = 0; i < arrNota.length; i++) {
                         let nota = arrNota[i];
@@ -4843,6 +4843,15 @@ async function prosesAntreanBackground() {
                             }
 
                             let jumlahDipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
+                            
+                            // 🔥 DETEKTIF BEKERJA: CATAT JEJAK PEMOTONGAN!
+                            if (jumlahDipotong > 0) {
+                                uangMasuk.detailPotongan.push({
+                                    tglNota: nota.tgl,
+                                    jumlah: jumlahDipotong
+                                });
+                            }
+
                             nota.terbayar += jumlahDipotong;
                             uangMasuk.sisaBayar -= jumlahDipotong;
                             sisaHutangNota -= jumlahDipotong;
@@ -4852,15 +4861,16 @@ async function prosesAntreanBackground() {
                     }
 
                     // C. Masukkan Nota yang MASIH NGUTANG ke tampilan PWA
+                    let hariIni = new Date();
+                    hariIni.setHours(0,0,0,0);
+                    
                     arrNota.forEach(nota => {
                         let sisaNyata = nota.totalTagihan - nota.terbayar;
 
-                        // Tampilkan HANYA JIKA BELUM LUNAS
                         if (sisaNyata > 0) {
                             let parts = nota.tgl.split('-');
                             let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : nota.tgl;
 
-                            // Kalkulator Deadline 15 Hari
                             let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
                             dTrx.setHours(0, 0, 0, 0);
                             let jtDate = new Date(dTrx);
@@ -4870,14 +4880,7 @@ async function prosesAntreanBackground() {
                             let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear();
 
                             serverData[r].dates[tglFormated] = {
-                                isLokal: false,
-                                tgl: tglFormated,
-                                tagihan: nota.totalTagihan,
-                                dp: nota.terbayar, // Ini yang bikin tulisan Ter-DP muncul!
-                                sisaNyata: sisaNyata,
-                                jt: jtString,
-                                isTelat: telatNih,
-                                items: nota.items
+                                isLokal: false, tgl: tglFormated, tagihan: nota.totalTagihan, dp: nota.terbayar, sisaNyata: sisaNyata, jt: jtString, isTelat: telatNih, items: nota.items
                             };
 
                             serverData[r].total += sisaNyata;
@@ -4901,6 +4904,40 @@ async function prosesAntreanBackground() {
                         };
                         serverData[r].total -= sisaDeposit;
                     }
+
+                    // E. 📝 BUNGKUS JEJAK RIWAYAT PEMBAYARAN KE UI (AMBIL 10 TERAKHIR)
+                    let nf = new Intl.NumberFormat('id-ID');
+                    let riwayatTerbalik = [...listBayar].reverse().slice(0, 10);
+                    
+                    riwayatTerbalik.forEach(byr => {
+                        let bParts = byr.tgl.split('-');
+                        let bTglStr = bParts.length === 3 ? `${bParts[2]}/${bParts[1]}/${bParts[0].substring(2)}` : byr.tgl;
+                        
+                        let ketText = ``;
+                        if (byr.detailPotongan.length > 0) {
+                            ketText += `<i style="color:#888;">Uang ini dipakai untuk memotong:</i><br>`;
+                            byr.detailPotongan.forEach(pot => {
+                                let nParts = pot.tglNota.split('-');
+                                let nTglStr = nParts.length === 3 ? `${nParts[2]}/${nParts[1]}/${nParts[0].substring(2)}` : pot.tglNota;
+                                ketText += `<span style="color:#555;">• Nota Tgl ${nTglStr} : <b>Rp ${nf.format(pot.jumlah)}</b></span><br>`;
+                            });
+                        }
+                        
+                        // Cek apakah ada sisa uang yang belum kepakai
+                        if (byr.sisaBayar > 0) {
+                            ketText += `<span style="color:#8AA624; font-weight:bold;">• Sisa Uang / Deposit : Rp ${nf.format(byr.sisaBayar)}</span><br>`;
+                        }
+
+                        if (ketText === '') {
+                            ketText = `<i style="color:#888;">Belum digunakan untuk memotong nota manapun.</i>`;
+                        }
+
+                        serverData[r].riwayat.push({
+                            tgl: bTglStr,
+                            nominal: byr.nominal,
+                            ket: ketText
+                        });
+                    });
                 }
 
                 // --- PEMBERSIH GHOST CACHE PIUTANG ---
