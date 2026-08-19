@@ -4445,15 +4445,18 @@ async function prosesAntreanBackground() {
                 fetch(`${SUPA_URL}/rest/v1/master_pakan?select=jenis_pakan,harga_beli`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
             ])
             .then(([masterData, cfData, masterPakanData]) => {
-                if (masterData.error) throw new Error(masterData.message);
-                if (cfData.error) throw new Error(cfData.message);
+                // 🔥 PERBAIKAN: Cek apakah wujud datanya benar-benar Array
+                if (!Array.isArray(masterData)) throw new Error(masterData.message || "Gagal memuat transaksi pakan");
+                if (!Array.isArray(cfData)) throw new Error(cfData.message || "Gagal memuat cashflow");
 
                 // Kamus HPP (Harga Modal)
                 let hppDict = {};
-                if (!masterPakanData.error) {
+                if (Array.isArray(masterPakanData)) {
                     masterPakanData.forEach(p => {
                         hppDict[p.jenis_pakan] = parseFloat(p.harga_beli) || 0;
                     });
+                } else {
+                    console.warn("Gagal memuat HPP dari master_pakan:", masterPakanData);
                 }
 
                 // 1. TERJEMAHKAN TRANSAKSI PAKAN
