@@ -3020,7 +3020,7 @@
             window.location.reload(true);
         }
 
-        const API_URL = "https://script.google.com/macros/s/AKfycbxU6Ga-ef5nkTzUY_dhIFGepd2rxNmlgsmp-o1AmmtLxmCGKupac2duthRekpOSkQYT/exec";
+        
         const NOMOR_WA_ADMIN = "6282143601114";
         const SUPA_URL = 'https://hwpbkdmaeqovhxttkrmj.supabase.co';
         const SUPA_ANON_KEY = 'sb_publishable_JAhHcT-Z-SZfLa3p9m3qvQ_WFAOew5A';
@@ -3663,10 +3663,10 @@ async function prosesAntreanBackground() {
             let cabangStr = mapLoc[pl.lokasi] || 'PM';
 
             // ===============================================
-            // 1. OTOMATIS UPLOAD SURAT JALAN JIKA ADA
+            // 1. OTOMATIS UPLOAD BERKAS/GAMBAR JIKA ADA
             // ===============================================
             let urlSJ = "-";
-            if (pl.status === "Masuk" && pl.fileSJ && pl.fileSJ.base64) {
+            if (pl.fileSJ && pl.fileSJ.base64) {
                 badge.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:16px; vertical-align:middle;">sync</span> Upload Surat Jalan...`;
                 let namaFile = `SJ_${cabangStr}_${Date.now()}_${Math.floor(Math.random()*100)}.jpg`;
                 try {
@@ -4144,15 +4144,13 @@ async function prosesAntreanBackground() {
 
             if (!pakan || isNaN(qty) || qty <= 0) { alert("⚠️ Pakan dan Qty (Kg) wajib diisi dengan benar!"); return; }
             if (tipe === 'reject' && (!tindakan || !fileBase64_Reject)) { alert("⚠️ Untuk barang Reject, Tindakan Eksekusi dan Foto Bukti WAJIB diisi!"); return; }
-            if (!navigator.onLine) return alert("⚠️ Fitur Koreksi Wajib Online!");
 
-            let payloadsToKirim = [];
             let tglSekarang = new Date().toISOString().split('T')[0];
             let timeHash = Date.now();
-            let lokasiGudang = getLokasiAktif(); // Otomatis menyesuaikan apakah lagi buka PM, SPN, atau RPH
+            let lokasiGudang = getLokasiAktif();
 
             if (tipe === 'transaksi') {
-                let f_fasilitas = lokasiGudang; // Ambil otomatis dari state aplikasi
+                let f_fasilitas = lokasiGudang;
                 let f_sifat = document.getElementById('koreksi_sifat').value;
                 let f_relasi = document.getElementById('koreksi_relasi').value.trim();
                 let f_catatan = document.getElementById('koreksi_catatan').value.trim();
@@ -4167,35 +4165,23 @@ async function prosesAntreanBackground() {
                     hashStr: `KOREKSITX_${pakan}_${qty}_${timeHash}`
                 };
 
-                // PUSH KE OFFLINE QUEUE (OPTIMISTIC UI AKTIF!)
                 if (typeof simpanOfflineSync === 'function') simpanOfflineSync(payloadKoreksi);
-
-                // KHUSUS KANDANG: UPDATE STOK LOKAL SECARA INSTAN
                 if (f_fasilitas === "/kandang" || f_fasilitas === "/spn_kandang") {
-                    let payload = payloadKoreksi;
-                    for (let p in payload.items) {
-                        let qty = parseFloat(payload.items[p]) || 0;
-                        if (globalStokKandang[p] === undefined) globalStokKandang[p] = 0;
-                        if (payload.status === "Masuk") globalStokKandang[p] += qty;
-                        else if (payload.status === "Keluar" || payload.lokasi === "/kandang") globalStokKandang[p] -= qty;
-                    }
+                    if (globalStokKandang[pakan] === undefined) globalStokKandang[pakan] = 0;
+                    if (f_sifat === "Masuk") globalStokKandang[pakan] += qty;
+                    else globalStokKandang[pakan] -= qty;
                     localStorage.setItem('stok_kandang_ptcbl', JSON.stringify(globalStokKandang));
                     let ind = document.getElementById('stok-kandang-indicator');
                     if (ind) ind.innerHTML = ICON_CLOUD;
                     renderMiniDashboardKandang();
                 }
 
-                // KIRIM BACKGROUND
                 simpanKeAntrianLokal(payloadKoreksi);
+                alert("✅ Koreksi Laporan berhasil dicatat!");
 
-                alert("✅ Koreksi Laporan berhasil dicatat!\nData Rekap Harian dan Stok sudah diperbarui secara instan.");
-                tutupModalKoreksi();
-                document.getElementById('koreksi_qty').value = "";
-                document.getElementById('koreksi_relasi').value = "";
-                document.getElementById('koreksi_catatan').value = "";
-                return; // Bypass Promise.all karena dikirim lewat Background Queue
-            } else if (tipe === 'reject') {
+            } else if (tipe === 'mutasi') {
                 if (blokSistem === blokFisik) return alert("⚠️ Blok Sistem dan Blok Fisik tidak boleh sama!");
+                
                 let payloadKembali = {
                     device_id: window.myDeviceId, petugas: petugas, lokasi: lokasiGudang, tanggal: tglSekarang,
                     status: "Masuk (Retur)", relasi: "KOREKSI - KEMBALI", ekor: 0,
@@ -4210,29 +4196,36 @@ async function prosesAntreanBackground() {
                     items: { [pakan]: qty }, detail_items: { [pakan]: { harga: 0, satuan: "Kg" } },
                     hashStr: `POTONG_${pakan}_${qty}_${timeHash}`
                 };
-                payloadsToKirim.push(payloadKembali);
-                payloadsToKirim.push(payloadPotongUlang);
+
+                suntikCacheOptimistic(payloadKembali);
+                suntikCacheOptimistic(payloadPotongUlang);
+                simpanKeAntrianLokal(payloadKembali);
+                simpanKeAntrianLokal(payloadPotongUlang);
+                alert("✅ Koreksi Blok berhasil dicatat!");
+
+            } else if (tipe === 'reject') {
+                let payloadReject = {
+                    device_id: window.myDeviceId, petugas: petugas, lokasi: lokasiGudang, tanggal: tglSekarang,
+                    status: "Keluar", relasi: "KOREKSI - REJECT", ekor: 0,
+                    alamat: `Dipotong dari ${blokSistem}`, ongkir: "", catatan: `[REJECT] ${tindakan}`,
+                    items: { [pakan]: qty }, detail_items: { [pakan]: { harga: 0, satuan: "Kg" } },
+                    fileSJ: { base64: fileBase64_Reject, mime: fileMime_Reject },
+                    hashStr: `REJECT_${pakan}_${qty}_${timeHash}`
+                };
+
+                suntikCacheOptimistic(payloadReject);
+                simpanKeAntrianLokal(payloadReject);
+                alert("✅ Barang Reject berhasil dicatat beserta bukti fotonya!");
             }
 
-            let btnKirim = document.getElementById('btn-submit-koreksi');
-            let oriText = btnKirim.innerText;
-            btnKirim.innerText = "Mengirim Bukti...";
-            btnKirim.disabled = true;
-
-            Promise.all(payloadsToKirim.map(pl =>
-                fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'pwa_cbl', payload: pl }) }).then(r => r.json())
-            )).then(results => {
-                let sukses = results.every(r => r.status === 'success');
-                if (sukses) {
-                    alert("✅ Laporan berhasil dieksekusi dan foto bukti telah disimpan!\nData akan otomatis muncul saat Anda menarik ulang Dashboard.");
-                    tutupModalKoreksi();
-                    document.getElementById('koreksi_qty').value = "";
-                    document.getElementById('koreksi_tindakan').value = "";
-                    document.getElementById('koreksi_foto').value = "";
-                    document.getElementById('koreksi_foto_preview_container').classList.add('hidden');
-                    fileBase64_Reject = ""; fileMime_Reject = "";
-                } else { alert("❌ Gagal menjahit sebagian data. Cek koneksi internet."); }
-            }).catch(e => alert("Error koneksi jaringan: " + e.message)).finally(() => { btnKirim.innerText = oriText; btnKirim.disabled = false; });
+            tutupModalKoreksi();
+            document.getElementById('koreksi_qty').value = "";
+            document.getElementById('koreksi_relasi').value = "";
+            document.getElementById('koreksi_catatan').value = "";
+            document.getElementById('koreksi_tindakan').value = "";
+            document.getElementById('koreksi_foto').value = "";
+            document.getElementById('koreksi_foto_preview_container').classList.add('hidden');
+            fileBase64_Reject = ""; fileMime_Reject = "";
         }
 
         function tarikDataRekapDB(forceRefresh = false) {
@@ -5695,25 +5688,45 @@ async function prosesAntreanBackground() {
                 const base64Clean = pdfBase64Data.split(',')[1]; const byteCharacters = atob(base64Clean); const byteNumbers = new Array(byteCharacters.length); for (let i = 0; i < byteCharacters.length; i++) { byteNumbers[i] = byteCharacters.charCodeAt(i); }
                 const byteArray = new Uint8Array(byteNumbers); const pdfBlob = new Blob([byteArray], { type: 'application/pdf' }); const filePdf = new File([pdfBlob], `${fileNameInv}.pdf`, { type: 'application/pdf' });
 
-                statusLabel.innerText = "Menyimpan salinan ke Arsip Google Drive...";
+                statusLabel.innerText = "Menyimpan arsip Invoice ke Database...";
 
                 // -- TANGKAP INPUT AUTO CASH-IN --
                 let isCashIn = document.getElementById('inv_input_cash').checked;
                 let nominalCashIn = isCashIn ? (parseInt(document.getElementById('inv_nominal_cash').value.replace(/[^0-9]/g, '')) || 0) : 0;
 
-                fetch(API_URL, {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        source: 'upload_invoice',
-                        noInvoice: noInv,
-                        pelanggan: namaKonsumenAktif,
-                        total: totalTagihan,
-                        namaFile: fileNameInv,
-                        fileBase64: base64Clean,
-                        isCashIn: isCashIn,           // Kirim status centang
-                        nominalCashIn: nominalCashIn  // Kirim nominal bayar
-                    })
+                // 1. Upload PDF ke Supabase Storage (Berjalan di background)
+                let pdfPath = `invoice/${fileNameInv.replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+                let resStorage = await fetch(`${SUPA_URL}/storage/v1/object/berkas_cbl/${pdfPath}`, {
+                     method: 'POST',
+                     headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}`, 'Content-Type': 'application/pdf' },
+                     body: pdfBlob
                 });
+                
+                let linkPdfSupa = "-";
+                if(resStorage.ok) {
+                    linkPdfSupa = `${SUPA_URL}/storage/v1/object/public/berkas_cbl/${pdfPath}`;
+                }
+
+                // 2. Jika ada Cash In, tembak langsung ke Cashflow Supabase
+                if (isCashIn && nominalCashIn > 0) {
+                    let cfPayload = {
+                        tanggal: new Date().toISOString().split('T')[0],
+                        jenis: "Masuk",
+                        metode: "Cash",
+                        kategori: "Bayar Pakan",
+                        relasi: namaKonsumenAktif,
+                        nominal: nominalCashIn,
+                        diskon: 0,
+                        keterangan: `Pembayaran tunai via Cetak Invoice ${noInv}`,
+                        bukti_url: linkPdfSupa, 
+                        petugas: activeUser || 'Admin'
+                    };
+                    await fetch(`${SUPA_URL}/rest/v1/cashflow`, {
+                        method: 'POST',
+                        headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+                        body: JSON.stringify(cfPayload)
+                    });
+                }
 
                 if (navigator.share) {
                     let namaP = namaKonsumenAktif.split('-')[0].trim();
@@ -5726,7 +5739,6 @@ async function prosesAntreanBackground() {
 
                     let pesanWA = `Yth. Bapak/Ibu ${namaP},\nBerikut kami lampirkan invoice tagihan pakan dengan rincian:\n• Nama Peternak: *${namaP}*\n• Total Tagihan: *Rp ${nf.format(totalTagihan)}*\n• Periode Pengambilan: *${periodeTgl}*\nMohon kesediaannya untuk mengecek lampiran tersebut. Silakan konfirmasi jika terdapat kekeliruan data. Terima kasih.`;
 
-                    // Tambahin info lunas kalau dia bayar tunai full
                     if (isCashIn && nominalCashIn == totalTagihan) {
                         pesanWA = `Yth. Bapak/Ibu ${namaP},\nBerikut kami lampirkan Invoice sekaligus kwitansi lunas atas pengambilan pakan periode *${periodeTgl}* senilai *Rp ${nf.format(totalTagihan)}*. Terima kasih banyak atas pembayarannya.`;
                     }
@@ -5738,8 +5750,6 @@ async function prosesAntreanBackground() {
                 modal.style.position = oriModalPos; wrapper.style.overflowX = oriWrapperOverflow; wrapper.style.WebkitOverflowScrolling = oriWrapperScrolling;
                 statusLabel.innerText = "⚠️ Gagal mencetak dokumen."; console.log(e);
             }
-            btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">share</span> SHARE PDF WA`; btn.disabled = false;
-        }
 
         function getLokasiAktif() {
             let u = document.querySelector('input[name="lokasi_utama"]:checked').value;
@@ -5972,11 +5982,20 @@ async function prosesAntreanBackground() {
 
             let loader = document.getElementById('loader-kandang');
             loader.classList.remove('hidden'); loader.innerText = "Mengeksekusi Sapu Bersih...";
-            fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'pwa_cbl', payload: payloadFlush }) })
-                .then(r => r.json()).then(res => {
-                    if (res.status === 'success') { alert("✅ Stok kandang berhasil dikuras!"); fetchStokKandang(); }
-                    else { alert("❌ Gagal: " + res.message); loader.classList.add('hidden'); }
-                }).catch(e => { alert("Error jaringan: " + e.message); loader.classList.add('hidden'); });
+            
+            // SUNTIK STOK KANDANG LOKAL SECARA INSTAN
+            if (globalStokKandang[pakan] !== undefined) {
+                globalStokKandang[pakan] -= sisaQty; 
+                if(globalStokKandang[pakan] < 0) globalStokKandang[pakan] = 0;
+            }
+            localStorage.setItem('stok_kandang_ptcbl', JSON.stringify(globalStokKandang));
+            
+            setTimeout(() => {
+                simpanKeAntrianLokal(payloadFlush);
+                loader.classList.add('hidden');
+                renderMiniDashboardKandang();
+                alert("✅ Stok kandang berhasil dikuras!\nData akan tersinkronisasi ke database secara otomatis.");
+            }, 500);
         }
 
         function renderPakan(response) { currentItems = response.data || []; let html = ''; if (currentItems.length === 0) html = '<div class="loader">Tidak ada data pakan</div>'; else { currentItems.forEach(function (item, index) { let formatHarga = new Intl.NumberFormat('id-ID').format(item.harga || 0); let labelInput = item.satuan || "Kg"; if (item.kemasan > 0) { let stepValue = item.kemasan; html += `<div class="menu-item"><div class="item-info"><div class="item-name">${item.nama}</div>${item.harga > 0 ? '<div class="item-price">Rp ' + formatHarga + ' / Kg</div>' : ''}</div><div class="counter-box" style="flex-direction: column; align-items: flex-end; gap: 2px;"><div style="display:flex; align-items:center; gap:5px;"><div class="btn-qty" onclick="ubahQty(${index}, -${stepValue})">-</div><input type="text" id="qty-${index}" class="qty-input calc-input" style="width: 55px !important; text-align:center !important; padding:0 !important;" placeholder="0" onclick="bukaKeyboard(${index})" readonly data-total="0" data-karung="0" data-kemasan="${stepValue}" data-satuan="${item.satuan}"><div class="btn-qty" onclick="ubahQty(${index}, ${stepValue})">+</div><span style="font-size:12px; font-weight:bold;">${labelInput}</span></div><span id="lbl-karung-${index}" style="font-size:11px; color:#e91e63; font-weight:bold; height:14px; margin-right: 20px;"></span></div></div>`; } else { html += `<div class="menu-item"><div class="item-info" style="flex: 1;"><div class="item-name">${item.nama}</div>${item.harga > 0 ? '<div class="item-price">Rp ' + formatHarga + ' / Kg</div>' : ''}</div><div class="counter-box" style="flex: 1.5; justify-content: flex-end;"><input type="text" id="qty-${index}" class="qty-input calc-input" placeholder="Cth: 35+28" onclick="bukaKeyboard(${index})" readonly data-total="0" data-karung="0" data-kemasan="0" data-satuan="${item.satuan}"><span id="hasil-${index}" class="hasil-calc">= 0</span><span style="font-size:12px; font-weight:bold; margin-left:5px;">${labelInput}</span></div></div>`; } }); } document.getElementById('product-list').innerHTML = html; }
