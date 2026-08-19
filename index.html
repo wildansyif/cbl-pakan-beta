@@ -3161,7 +3161,7 @@
             let nf = new Intl.NumberFormat('id-ID');
             let today = new Date().getTime();
 
-            // 🔥 LOGIKA ALARM PINTAR (Cek Per Gudang, Bukan Total Global)
+            // 🔥 LOGIKA ALARM PINTAR (Cek Per Gudang, Diringkas Per Pakan)
             let stockPerGudangPakan = {};
             globalDataStok.forEach(s => {
                 if (valPakan !== "ALL" && s.pakan !== valPakan) return;
@@ -3170,15 +3170,30 @@
                 stockPerGudangPakan[key].total += s.qty;
             });
 
-            // Tampilkan Alarm sesuai Gudang yang sedang dipilih (Meskipun di Tab "ALL")
+            let alarmGroups = {};
             for (let k in stockPerGudangPakan) {
                 let d = stockPerGudangPakan[k];
                 if (gdg !== "ALL" && d.gudang !== gdg) continue; 
                 let minAman = window.minStokDict ? (window.minStokDict[d.pakan] || 500) : 500;
                 
+                // Jika Kritis, masukkan ke kelompok namanya
                 if (d.total <= minAman) {
-                    htmlAlarm += `<div style="background:#ffebee; color:#c62828; padding:8px 12px; border-radius:6px; font-size:11px; font-weight:bold; margin-bottom:8px; display:flex; align-items:center; gap:5px; border: 1px solid #ffcdd2;"><span class="material-symbols-outlined" style="font-size:14px;">warning</span> KRITIS: ${d.pakan} di ${d.gudang} sisa ${nf.format(d.total)} Kg (Batas Aman: ${nf.format(minAman)} Kg)</div>`;
+                    if (!alarmGroups[d.pakan]) alarmGroups[d.pakan] = { min: minAman, locs: [] };
+                    alarmGroups[d.pakan].locs.push(`<b>${d.gudang}</b> (${nf.format(d.total)} Kg)`);
                 }
+            }
+
+            // Render Banner Alarm secara Horizontal
+            for (let p in alarmGroups) {
+                let info = alarmGroups[p];
+                htmlAlarm += `
+                <div style="background:#ffebee; color:#c62828; padding:8px 12px; border-radius:6px; font-size:11px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border: 1px solid #ffcdd2;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span class="material-symbols-outlined" style="font-size:16px; font-weight:bold;">warning</span>
+                        <span>KRITIS: <b style="font-size:12px;">${p}</b> &nbsp;👉&nbsp; ${info.locs.join(' <span style="color:#ef9a9a;">|</span> ')}</span>
+                    </div>
+                    <span style="font-size:9px; color:#e57373;">Batas: ${nf.format(info.min)} Kg</span>
+                </div>`;
             }
 
             for (let pakan in groupedPakan) {
@@ -3285,8 +3300,27 @@
 
         function renderRencanaPO() {
             let container = document.getElementById('list-po-container');
-            if (!container) return;
             
+            // 🔥 FOOL-PROOF: Bikin wadah otomatis kalau HTML-nya kehapus/kurang
+            if (!container) {
+                let parentArea = document.getElementById('stok-content-area');
+                if (parentArea) {
+                    let poView = document.createElement('div');
+                    poView.id = "view-stok-po";
+                    poView.className = "stok-view hidden";
+                    poView.innerHTML = `
+                        <div style="background:#FFFFF0; border:1px dashed #FEA405; padding:10px; border-radius:8px; font-size:11px; color:#555; margin-bottom:15px; text-align:center;">
+                            Estimasi kebutuhan dan saran Purchase Order (PO) berdasarkan pemakaian aktual 15 hari ke belakang.
+                        </div>
+                        <div id="list-po-container"></div>
+                    `;
+                    parentArea.appendChild(poView);
+                    container = document.getElementById('list-po-container');
+                } else {
+                    return; // Gagal total jika parent tidak ada
+                }
+            }
+
             if (!window.globalDataPO || window.globalDataPO.length === 0) {
                 container.innerHTML = "<div style='text-align:center; padding:20px; font-size:12px; color:#888;'>Tidak ada data histori PO atau belum disinkronisasi.</div>";
                 return;
