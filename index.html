@@ -4438,26 +4438,14 @@ async function prosesAntreanBackground() {
             let startDate = `${tahun}-01-01`;
             let endDate = `${tahun}-12-31`;
 
-            // 🚀 TEMBAK KE 3 TABEL SUPABASE SEKALIGUS (Pakan, CF, dan Harga HPP)
+            // 🚀 TEMBAK KE 2 TABEL SUPABASE SAJA (Lebih Cepat & Hemat Kuota!)
             Promise.all([
                 fetch(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
-                fetch(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
-                fetch(`${SUPA_URL}/rest/v1/master_pakan?select=jenis_pakan,harga_beli`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
+                fetch(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
             ])
-            .then(([masterData, cfData, masterPakanData]) => {
-                // 🔥 PERBAIKAN: Cek apakah wujud datanya benar-benar Array
+            .then(([masterData, cfData]) => {
                 if (!Array.isArray(masterData)) throw new Error(masterData.message || "Gagal memuat transaksi pakan");
                 if (!Array.isArray(cfData)) throw new Error(cfData.message || "Gagal memuat cashflow");
-
-                // Kamus HPP (Harga Modal)
-                let hppDict = {};
-                if (Array.isArray(masterPakanData)) {
-                    masterPakanData.forEach(p => {
-                        hppDict[p.jenis_pakan] = parseFloat(p.harga_beli) || 0;
-                    });
-                } else {
-                    console.warn("Gagal memuat HPP dari master_pakan:", masterPakanData);
-                }
 
                 // 1. TERJEMAHKAN TRANSAKSI PAKAN
                 let rawMaster = masterData.map(row => {
@@ -4480,7 +4468,7 @@ async function prosesAntreanBackground() {
                     let qty = parseFloat(row.qty) || 0;
                     let omzet = qty * (parseFloat(row.harga_satuan) || 0);
                     
-                    // 🔥 PERBAIKAN: Berhenti menebak! Ambil langsung hasil hitungan FIFO dari Supabase
+                    // 🔥 PERBAIKAN FINAL: Ambil HPP matang dari mesin FIFO Supabase Bapak!
                     let hpp = 0;
                     if (cGroup === "keluar") {
                         hpp = parseFloat(row.total_hpp) || 0;
