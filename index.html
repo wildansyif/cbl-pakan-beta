@@ -4401,18 +4401,29 @@ async function prosesAntreanBackground() {
             let bulanVal = document.getElementById('gl_bulan').value;
             let bulan = bulanVal === 'ALL' ? 'ALL' : parseInt(bulanVal);
 
-            let cacheKey = `analytics_raw_data_${tahun}`; // Nyimpen Mentahan 1 Tahun Full!
+            let cacheKey = `analytics_raw_data_supa_${tahun}`; 
             let savedRaw = localStorage.getItem(cacheKey);
 
-            // JIKA DATA 1 TAHUN SUDAH ADA DI HP:
+            // JIKA DATA 1 TAHUN SUDAH ADA DI HP (CACHE SUPABASE)
             if (savedRaw && !force) {
                 document.getElementById('gl_loader').classList.remove('hidden');
                 document.getElementById('gl_loader').innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:14px; vertical-align:middle;">sync</span> Merender visual...`;
 
-                setTimeout(() => { // Jeda 50ms biar UI loader sempet muncul sekilas
+                setTimeout(() => { 
                     let rawData = JSON.parse(savedRaw);
+                    
+                    // 🔥 TRIK CERDAS: Ambil ringkasan Piutang dari Cache Menu Piutang
+                    let ptgCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
+                    let rawKP = [];
+                    for (let r in ptgCache) {
+                        let item = ptgCache[r];
+                        if (item.totalTelat > 0) rawKP.push({ nominal: item.totalTelat, isTelat: true });
+                        if (item.totalSehat > 0) rawKP.push({ nominal: item.totalSehat, isTelat: false });
+                    }
+                    rawData.kp = rawKP; // Suntikkan data piutang segar ke memori analitik
+
                     let processedData = mesinKalkulasiPWA(rawData, bulan, tahun);
-                    cacheDataGlobal = processedData; // <-- FIXED: Ini wajib biar Chart.js dapet datanya
+                    cacheDataGlobal = processedData; 
                     renderAnalyticsVisual(processedData);
                     document.getElementById('gl_loader').classList.add('hidden');
                 }, 50);
@@ -4422,18 +4433,105 @@ async function prosesAntreanBackground() {
             if (!navigator.onLine) { alert("Wajib online untuk menarik rekapan 1 Tahun dari server!"); return; }
 
             document.getElementById('gl_loader').classList.remove('hidden');
-            document.getElementById('gl_loader').innerHTML = `Sinkronisasi Data Server...`;
+            document.getElementById('gl_loader').innerHTML = `Menyedot Data Bisnis ${tahun} dari Supabase...`;
 
-            fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'analytics_global', tahun: tahun }) })
-                .then(res => res.json()).then(res => {
-                    document.getElementById('gl_loader').classList.add('hidden');
-                    if (res.status === 'success') {
-                        localStorage.setItem(cacheKey, JSON.stringify(res.data)); // Simpan mentahan ke HP
-                        let processedData = mesinKalkulasiPWA(res.data, bulan, tahun);
-                        cacheDataGlobal = processedData; // <-- FIXED: Ini biang kerok Chart ilang kemarin
-                        renderAnalyticsVisual(processedData);
-                    } else { alert("Error: " + res.message); }
-                }).catch(e => { document.getElementById('gl_loader').classList.add('hidden'); alert("Error Jaringan: " + e.message); });
+            let startDate = `${tahun}-01-01`;
+            let endDate = `${tahun}-12-31`;
+
+            // 🚀 TEMBAK KE 3 TABEL SUPABASE SEKALIGUS (Pakan, CF, dan Harga HPP)
+            Promise.all([
+                fetch(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
+                fetch(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
+                fetch(`${SUPA_URL}/rest/v1/master_pakan?select=jenis_pakan,harga_beli`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
+            ])
+            .then(([masterData, cfData, masterPakanData]) => {
+                if (masterData.error) throw new Error(masterData.message);
+                if (cfData.error) throw new Error(cfData.message);
+
+                // Kamus HPP (Harga Modal)
+                let hppDict = {};
+                if (!masterPakanData.error) {
+                    masterPakanData.forEach(p => {
+                        hppDict[p.jenis_pakan] = parseFloat(p.harga_beli) || 0;
+                    });
+                }
+
+                // 1. TERJEMAHKAN TRANSAKSI PAKAN
+                let rawMaster = masterData.map(row => {
+                    let tglObj = new Date(row.tanggal);
+                    let namaRelasi = String(row.relasi).toLowerCase();
+                    let cKat = "penjualan", cGroup = "keluar";
+
+                    if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) {
+                        cKat = "giling"; cGroup = "keluar";
+                    } else if (String(row.status).toLowerCase().includes("masuk")) {
+                        cGroup = "masuk";
+                        cKat = String(row.catatan||"").toLowerCase().includes("gudang") ? "mutasi" : "masuk";
+                    } else {
+                        if (String(row.cabang).toLowerCase().includes('kandang')) cKat = "pemakaian";
+                        else if (namaRelasi.includes("kandang") || namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) cKat = "mutasi";
+                        else cKat = "penjualan";
+                    }
+
+                    let pakan = row.pakan || 'Pakan'; 
+                    let qty = parseFloat(row.qty) || 0;
+                    let omzet = qty * (parseFloat(row.harga_satuan) || 0);
+                    let hpp = qty * (hppDict[pakan] || 0);
+
+                    return {
+                        bln: tglObj.getMonth() + 1,
+                        tglDb: tglObj.getDate(),
+                        gudang: row.cabang || 'PM',
+                        kat: cKat,
+                        catGroup: cGroup,
+                        status: String(row.status).toLowerCase(),
+                        pakan: pakan,
+                        qty: qty,
+                        omzet: omzet,
+                        hpp: hpp,
+                        relasi: row.relasi || '-'
+                    };
+                });
+
+                // 2. TERJEMAHKAN CASHFLOW
+                let rawCF = cfData.map(row => {
+                    let tglObj = new Date(row.tanggal);
+                    let isMasuk = String(row.jenis).toLowerCase().includes("masuk");
+                    let nom = parseFloat(row.nominal) || 0;
+                    return {
+                        bln: tglObj.getMonth() + 1,
+                        debet: isMasuk ? nom : 0,
+                        kredit: !isMasuk ? nom : 0,
+                        kat: row.kategori || "Lainnya",
+                        met: row.metode || "Cash",
+                        relasi: row.relasi || "-",
+                        tglFormat: `${("0"+tglObj.getDate()).slice(-2)}/${("0"+(tglObj.getMonth()+1)).slice(-2)}`,
+                        katCF: row.kategori || "Lainnya"
+                    };
+                });
+
+                // 3. AMBIL STATUS PIUTANG GLOBAL
+                let ptgCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
+                let rawKP = [];
+                for (let r in ptgCache) {
+                    let item = ptgCache[r];
+                    if (item.totalTelat > 0) rawKP.push({ nominal: item.totalTelat, isTelat: true });
+                    if (item.totalSehat > 0) rawKP.push({ nominal: item.totalSehat, isTelat: false });
+                }
+
+                // 4. BUNGKUS DAN RENDER
+                let finalRawData = { master: rawMaster, cf: rawCF, kp: rawKP };
+                localStorage.setItem(cacheKey, JSON.stringify(finalRawData)); 
+                
+                let processedData = mesinKalkulasiPWA(finalRawData, bulan, tahun);
+                cacheDataGlobal = processedData; 
+                renderAnalyticsVisual(processedData);
+                document.getElementById('gl_loader').classList.add('hidden');
+
+            }).catch(e => {
+                document.getElementById('gl_loader').classList.add('hidden'); 
+                alert("Error Supabase: " + e.message); 
+            });
         }
 
         function mesinKalkulasiPWA(raw, fM, fY) {
