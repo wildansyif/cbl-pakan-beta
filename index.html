@@ -3104,7 +3104,7 @@
             document.getElementById('po_end').valueAsDate = endPO;
             document.getElementById('po_start').valueAsDate = startPO;
 
-            // 🚀 TEMBAK HANYA STOK BATCH & MASTER PAKAN (Estimasi PO ditarik pakai tombol Cari)
+            // 🚀 TEMBAK HANYA STOK BATCH & MASTER PAKAN
             Promise.all([
                 fetch(`${SUPA_URL}/rest/v1/stok_batch?qty_sisa=gt.0&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
                 fetch(`${SUPA_URL}/rest/v1/master_pakan?select=jenis_pakan,min_stok`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
@@ -3126,7 +3126,13 @@
                     batchId: s.id
                 }));
                 
-                populateDropdownStok();
+                // 🔥 FIX: Isi Dropdown Filter secara langsung (Inline)
+                globalPakanListStok = [...new Set(globalDataStok.map(s => s.pakan))].sort();
+                let blokList = [...new Set(globalDataStok.map(s => s.blok))].sort();
+                let selBlok = document.getElementById('filter-blok');
+                selBlok.innerHTML = '<option value="ALL">Semua Blok</option>';
+                blokList.forEach(b => selBlok.innerHTML += `<option value="${b}">${b}</option>`);
+
                 renderListStokV5();
                 
                 // Auto-run tarik PO agar tidak blank saat baru buka
@@ -3311,7 +3317,6 @@
             container.innerHTML = "";
             loader.classList.remove('hidden');
 
-            // 🚀 TEMBAK KE RPC SUPABASE YANG BARU KITA BUAT
             fetch(`${SUPA_URL}/rest/v1/rpc/get_estimasi_po`, {
                 method: 'POST',
                 headers: { 
@@ -3333,70 +3338,73 @@
 
                 let gdg = document.querySelector('input[name="stok_gudang"]:checked').value;
                 let nf = new Intl.NumberFormat('id-ID');
-                let html = "";
-
-                // Grouping berdasar Gudang
-                let groupedPO = {};
-                data.forEach(d => {
-                    if (gdg !== "ALL" && d.cabang !== gdg) return;
-                    if (!groupedPO[d.cabang]) groupedPO[d.cabang] = [];
-                    groupedPO[d.cabang].push(d);
-                });
-
-                for (let cbg in groupedPO) {
-                    html += `<h3 style="color:#1a5c40; font-size:14px; margin-top:15px; margin-bottom:10px; border-bottom:2px solid #8AA624; padding-bottom:5px;">${cbg === 'ALL' ? 'DATA GUDANG GLOBAL' : 'GUDANG ' + cbg}</h3>`;
-                    
-                    // Sortir: Yang Paling Kritis (Saran PO Tertinggi) di atas!
-                    groupedPO[cbg].sort((a,b) => b.saran_po_kg - a.saran_po_kg);
-
-                    groupedPO[cbg].forEach(p => {
-                        // Abaikan pakan yang stoknya 0 dan tidak ada riwayat sama sekali di rentang tgl tsb
-                        if (p.saran_po_kg <= 0 && p.stok_terkini <= 0 && p.total_kebutuhan_periode === 0) return;
-
-                        let isKritis = p.saran_po_kg > 0;
-                        let borderColor = isKritis ? "#e65100" : "#8AA624";
-                        let bgBadge = isKritis ? "background:#ffebee; color:#c62828;" : "background:#e8f0d8; color:#2e7d32;";
-                        let statusTeks = isKritis ? "PERLU ORDER" : "STOK AMAN";
-
-                        html += `
-                        <div class="rekap-card" style="border-left: 4px solid ${borderColor}; padding:12px; margin-bottom:12px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #eee; padding-bottom:8px; margin-bottom:8px;">
-                                <strong style="font-size:14px; color:#333;">${p.pakan}</strong>
-                                <span style="${bgBadge} padding:4px 8px; border-radius:4px; font-size:10px; font-weight:bold;">${statusTeks}</span>
-                            </div>
-                            
-                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:11px; margin-bottom:10px;">
-                                <div>
-                                    <div style="color:#888;">Pemakaian Periode Ini:</div>
-                                    <div style="font-size:13px; font-weight:bold; color:#555;">${nf.format(p.total_kebutuhan_periode)} Kg</div>
-                                </div>
-                                <div>
-                                    <div style="color:#888;">Sisa Stok Terkini:</div>
-                                    <div style="font-size:13px; font-weight:bold; color:#555;">${nf.format(p.stok_terkini)} Kg</div>
-                                </div>
-                            </div>
-
-                            <div style="background:#fafafa; border:1px solid #eee; padding:8px; border-radius:6px; font-size:10px; color:#666; margin-bottom:10px; line-height: 1.4;">
-                                <b>Rincian Distribusi Keluar:</b><br>
-                                Penjualan: <b>${nf.format(p.est_penjualan)} Kg</b> &nbsp;|&nbsp; Mutasi: <b>${nf.format(p.est_mutasi)} Kg</b><br>
-                                Gilingan: <b>${nf.format(p.est_giling)} Kg</b> &nbsp;|&nbsp; Kandang: <b>${nf.format(p.est_pemakaian)} Kg</b>
-                            </div>
-
-                            <div style="display:flex; justify-content:space-between; align-items:center; background:#f5f5f5; padding:8px; border-radius:6px;">
-                                <div style="font-size:10px; color:#888;">
-                                    Batas Aman Gudang: <b>${nf.format(p.batas_aman_minimal)} Kg</b><br>
-                                    Estimasi Ketahanan: <b><span style="color:${p.sisa_hari_aman <= 3 ? '#c62828' : '#888'};">${p.sisa_hari_aman === 999 ? '> 30' : p.sisa_hari_aman} Hari Lagi</span></b>
-                                </div>
-                                <div style="text-align:right;">
-                                    <div style="font-size:10px; font-weight:bold; color:${borderColor};">SARAN ORDER (PO):</div>
-                                    <div style="font-size:16px; font-weight:bold; color:${borderColor};">${nf.format(p.saran_po_kg)} Kg</div>
-                                </div>
-                            </div>
-                        </div>`;
-                    });
+                
+                // Filter berdasarkan lokasi yang dipilih
+                let filteredData = data.filter(d => gdg === "ALL" || d.cabang === gdg);
+                
+                if(filteredData.length === 0) {
+                    container.innerHTML = "<div style='text-align:center; padding:20px; font-size:12px; color:#888;'>Tidak ada data PO untuk gudang ini.</div>";
+                    return;
                 }
 
-                container.innerHTML = html || "<div style='text-align:center; color:#888; font-size:12px; padding:20px;'>Semua pakan aman, tidak ada saran PO untuk gudang ini.</div>";
+                // Sortir: Saran PO tertinggi (Paling Kritis) ditaruh di paling atas
+                filteredData.sort((a,b) => b.saran_po_kg - a.saran_po_kg);
+
+                // 🔥 RENDER TABEL HEADER
+                let html = `
+                <div style="overflow-x:auto; background:#fff; border:1px solid #DBE4C9; border-radius:8px; margin-top:10px; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
+                    <table style="width:100%; font-size:11px; border-collapse:collapse; white-space:nowrap;">
+                        <thead>
+                            <tr style="background:#1a5c40; color:white; text-align:center;">
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9; text-align:left;">Gudang</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9; text-align:left;">Jenis Pakan</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Penjualan</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Pemakaian</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Giling</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Mutasi</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9; background:#11402a;">Total Keb.</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9; background:#11402a;">Sisa Stok</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Est. Ketahanan</th>
+                                <th style="padding:10px 8px; border:1px solid #DBE4C9; color:#FEA405; background:#11402a;">Saran Order</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+                let adaDataValid = false;
+
+                // RENDER ISI TABEL
+                filteredData.forEach(p => {
+                    // Abaikan pakan yang stoknya 0 dan tidak ada aktivitas keluar
+                    if (p.saran_po_kg <= 0 && p.stok_terkini <= 0 && p.total_kebutuhan_periode === 0) return;
+                    adaDataValid = true;
+
+                    let isKritis = p.saran_po_kg > 0;
+                    let bgRow = isKritis ? "background:#fff8e1;" : "background:#fff;";
+                    let fwPO = isKritis ? "font-weight:bold; color:#c62828; font-size:12px;" : "color:#555;";
+                    let ketahananText = p.sisa_hari_aman === 999 ? '> 30 Hari' : `${p.sisa_hari_aman} Hari`;
+                    let warnHari = (p.sisa_hari_aman <= 3 && isKritis) ? "color:#c62828; font-weight:bold;" : "color:#555;";
+
+                    html += `<tr style="${bgRow} border-bottom:1px solid #eee;">
+                        <td style="padding:8px; border:1px solid #eee; text-align:left;">${p.cabang}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:left; font-weight:bold; color:#333;">${p.pakan}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:right;">${nf.format(p.est_penjualan)}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:right;">${nf.format(p.est_pemakaian)}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:right;">${nf.format(p.est_giling)}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:right;">${nf.format(p.est_mutasi)}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:right; font-weight:bold; background:rgba(138, 166, 36, 0.1);">${nf.format(p.total_kebutuhan_periode)}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:right; font-weight:bold; background:rgba(138, 166, 36, 0.1);">${nf.format(p.stok_terkini)}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:center; ${warnHari}">${ketahananText}</td>
+                        <td style="padding:8px; border:1px solid #eee; text-align:right; ${fwPO} background:rgba(254, 164, 5, 0.1);">${nf.format(p.saran_po_kg)}</td>
+                    </tr>`;
+                });
+
+                html += `</tbody></table></div>`;
+                
+                if(!adaDataValid) {
+                    html = "<div style='text-align:center; color:#888; font-size:12px; padding:20px;'>Semua pakan aman, tidak ada saran PO untuk gudang ini.</div>";
+                }
+
+                container.innerHTML = html;
 
             }).catch(e => {
                 loader.classList.add('hidden');
