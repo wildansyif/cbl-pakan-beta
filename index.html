@@ -3197,7 +3197,7 @@
                 <div style="background:#ffebee; color:#c62828; padding:8px 12px; border-radius:6px; font-size:11px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; border: 1px solid #ffcdd2;">
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span class="material-symbols-outlined" style="font-size:16px; font-weight:bold;">warning</span>
-                        <span>KRITIS: <b style="font-size:12px;">${p}</b> &nbsp;👉&nbsp; ${info.locs.join(' <span style="color:#ef9a9a;">|</span> ')}</span>
+                        <span>KRITIS: <b style="font-size:12px;">${p}</b> &nbsp;|&nbsp; ${info.locs.join(' <span style="color:#ef9a9a;">-</span> ')}</span>
                     </div>
                     <span style="font-size:9px; color:#e57373;">Batas: ${nf.format(info.min)} Kg</span>
                 </div>`;
@@ -3278,7 +3278,7 @@
                     let pData = pakanInBlok[p];
                     rincianBlokHtml += `
                   <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#555; margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #eee;">
-                      <div><span>🌾 <b style="color:#333; font-size:12px;">${p}</b> <span style="font-size:9px; color:#8AA624; font-weight:bold;">(${pData.gudang})</span></span><br><small style="color:#888; font-size:9px;">Digabungkan dari ${pData.countBatch} Batch</small></div>
+                      <div><span><b style="color:#333; font-size:12px;">${p}</b> <span style="font-size:9px; color:#8AA624; font-weight:bold;">(${pData.gudang})</span></span><br><small style="color:#888; font-size:9px;">Digabungkan dari ${pData.countBatch} Batch</small></div>
                       <div style="display:flex; align-items:center; gap:10px;">
                           <span style="font-weight:bold; color:#e65100; font-size:12px;">${nf.format(pData.totalQty)} Kg</span>
                           <div style="background:#e8f5e9; color:#2e7d32; padding:4px 8px; border-radius:20px; border:1px solid #c8e6c9; cursor:pointer; display:inline-flex; align-items:center; gap:3px;" onclick="cekKartuStokBlok('${p}', '${blok}', '${pData.gudang}')">
@@ -3339,7 +3339,6 @@
                 let gdg = document.querySelector('input[name="stok_gudang"]:checked').value;
                 let nf = new Intl.NumberFormat('id-ID');
                 
-                // Filter berdasarkan lokasi yang dipilih
                 let filteredData = data.filter(d => gdg === "ALL" || d.cabang === gdg);
                 
                 if(filteredData.length === 0) {
@@ -3347,61 +3346,59 @@
                     return;
                 }
 
-                // Sortir: Saran PO tertinggi (Paling Kritis) ditaruh di paling atas
                 filteredData.sort((a,b) => b.saran_po_kg - a.saran_po_kg);
 
-                // 🔥 RENDER TABEL HEADER
+                // 🔥 RENDER TABEL HEADER (Tegas, Kontras, Profesional)
                 let html = `
-                <div style="overflow-x:auto; background:#fff; border:1px solid #DBE4C9; border-radius:8px; margin-top:10px; box-shadow:0 4px 6px rgba(0,0,0,0.05);">
-                    <table style="width:100%; font-size:11px; border-collapse:collapse; white-space:nowrap;">
+                <div style="overflow-x:auto; margin-top:10px; box-shadow:0 4px 6px rgba(0,0,0,0.1);">
+                    <table style="width:100%; font-size:12px; border-collapse:collapse; white-space:nowrap; border: 1px solid #999;">
                         <thead>
-                            <tr style="background:#1a5c40; color:white; text-align:center;">
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9; text-align:left;">Gudang</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9; text-align:left;">Jenis Pakan</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Penjualan</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Pemakaian</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Giling</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Mutasi</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9; background:#11402a;">Total Keb.</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9; background:#11402a;">Sisa Stok</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9;">Est. Ketahanan</th>
-                                <th style="padding:10px 8px; border:1px solid #DBE4C9; color:#FEA405; background:#11402a;">Saran Order</th>
+                            <tr style="background:#1a5c40; color:#ffffff; text-align:center;">
+                                <th style="padding:12px 8px; border:1px solid #999;">Gudang</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Jenis Pakan</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Penjualan</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Pemakaian</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Giling</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Mutasi</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Total Keb.</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Sisa Stok</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Est. Ketahanan</th>
+                                <th style="padding:12px 8px; border:1px solid #999;">Saran Order</th>
                             </tr>
                         </thead>
                         <tbody>`;
 
                 let adaDataValid = false;
 
-                // RENDER ISI TABEL
                 filteredData.forEach(p => {
-                    // Abaikan pakan yang stoknya 0 dan tidak ada aktivitas keluar
+                    // Abaikan jika tidak butuh PO dan tidak ada pergerakan
                     if (p.saran_po_kg <= 0 && p.stok_terkini <= 0 && p.total_kebutuhan_periode === 0) return;
                     adaDataValid = true;
 
                     let isKritis = p.saran_po_kg > 0;
-                    let bgRow = isKritis ? "background:#fff8e1;" : "background:#fff;";
-                    let fwPO = isKritis ? "font-weight:bold; color:#c62828; font-size:12px;" : "color:#555;";
                     let ketahananText = p.sisa_hari_aman === 999 ? '> 30 Hari' : `${p.sisa_hari_aman} Hari`;
-                    let warnHari = (p.sisa_hari_aman <= 3 && isKritis) ? "color:#c62828; font-weight:bold;" : "color:#555;";
+                    
+                    // Highlight merah hanya untuk teks ketahanan yang menipis
+                    let warnHari = (p.sisa_hari_aman <= 3 && isKritis) ? "color:#c62828; font-weight:bold;" : "color:#000;";
 
-                    html += `<tr style="${bgRow} border-bottom:1px solid #eee;">
-                        <td style="padding:8px; border:1px solid #eee; text-align:left;">${p.cabang}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:left; font-weight:bold; color:#333;">${p.pakan}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:right;">${nf.format(p.est_penjualan)}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:right;">${nf.format(p.est_pemakaian)}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:right;">${nf.format(p.est_giling)}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:right;">${nf.format(p.est_mutasi)}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:right; font-weight:bold; background:rgba(138, 166, 36, 0.1);">${nf.format(p.total_kebutuhan_periode)}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:right; font-weight:bold; background:rgba(138, 166, 36, 0.1);">${nf.format(p.stok_terkini)}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:center; ${warnHari}">${ketahananText}</td>
-                        <td style="padding:8px; border:1px solid #eee; text-align:right; ${fwPO} background:rgba(254, 164, 5, 0.1);">${nf.format(p.saran_po_kg)}</td>
+                    html += `<tr style="background:#fff; color:#000; border-bottom:1px solid #999;">
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:center;">${p.cabang}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:left; font-weight:bold;">${p.pakan}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right;">${nf.format(p.est_penjualan)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right;">${nf.format(p.est_pemakaian)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right;">${nf.format(p.est_giling)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right;">${nf.format(p.est_mutasi)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold;">${nf.format(p.total_kebutuhan_periode)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold;">${nf.format(p.stok_terkini)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:center; ${warnHari}">${ketahananText}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold; color:#000;">${nf.format(p.saran_po_kg)}</td>
                     </tr>`;
                 });
 
                 html += `</tbody></table></div>`;
                 
                 if(!adaDataValid) {
-                    html = "<div style='text-align:center; color:#888; font-size:12px; padding:20px;'>Semua pakan aman, tidak ada saran PO untuk gudang ini.</div>";
+                    html = "<div style='text-align:center; color:#888; font-size:12px; padding:20px; background:#fff; border:1px solid #ddd; border-radius:8px;'>Semua pakan aman, tidak ada saran PO untuk gudang ini.</div>";
                 }
 
                 container.innerHTML = html;
@@ -3488,7 +3485,7 @@
                         let tglArr = r.tglMasuk.split('-');
                         let tglStr = tglArr.length === 3 ? `${tglArr[2]}/${tglArr[1]}/${tglArr[0].substring(2)}` : r.tglMasuk;
                         return `<div style="display:flex; justify-content:space-between; font-size:11px; color:#555; margin-bottom:4px; padding-bottom:4px; border-bottom:1px solid #eee;">
-                          <span>📦 ${r.pakan} (${tglStr})</span><span style="font-weight:bold; color:#8AA624;">${nf.format(r.qty)} Kg</span>
+                          <span>${r.pakan} (${tglStr})</span><span style="font-weight:bold; color:#8AA624;">${nf.format(r.qty)} Kg</span>
                       </div>`;
                     }).join('');
 
