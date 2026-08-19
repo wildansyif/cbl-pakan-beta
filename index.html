@@ -4116,9 +4116,12 @@ async function prosesAntreanBackground() {
         }
 
         function tarikDataRekapDB(forceRefresh = false) {
-            let bulan = document.getElementById('f_bulan').value; let tahun = document.getElementById('f_tahun').value;
-            let cacheKey = `rekap_cbl_${tahun}_${bulan}`; let savedData = localStorage.getItem(cacheKey);
+            let bulan = document.getElementById('f_bulan').value; 
+            let tahun = document.getElementById('f_tahun').value;
+            let cacheKey = `rekap_cbl_${tahun}_${bulan}`; 
+            let savedData = localStorage.getItem(cacheKey);
 
+            // Jika ada cache lokal dan user tidak menekan tombol Sinkron, tampilkan instan (0 detik)
             if (savedData && !forceRefresh) {
                 let parsed = JSON.parse(savedData);
                 let serverMaster = parsed.rawMaster;
@@ -4129,45 +4132,127 @@ async function prosesAntreanBackground() {
                 rawMasterGlobal = [...serverMaster, ...currentPending];
                 document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">task_alt</span> Data Offline: ditarik ${parsed.waktuTarik}`; document.getElementById('info-cache').style.color = "#8AA624";
                 document.getElementById('rekap-calendar').classList.remove('hidden'); terapkanFilter();
-            } else {
-                if (!savedData) {
-                    document.getElementById('rekap-summary-container').innerHTML = ""; document.getElementById('rekap-calendar').classList.add('hidden'); document.getElementById('btn-copy-rekap').classList.add('hidden');
-                    document.getElementById('rekap-hasil').innerHTML = '<div class="loader">Menyisir Database dari Server...</div>';
-                }
-                if (!navigator.onLine) { if (!savedData) alert("Data bulan ini belum ada di HP. Butuh internet!"); return; }
-
-                document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">sync</span> Menyinkronkan di latar belakang...`; document.getElementById('info-cache').style.color = "#FEA405";
-
-                fetch(API_URL, { method: 'POST', body: JSON.stringify({ source: 'pwa_rekap', bulan: bulan, tahun: tahun }) })
-                    .then(res => res.json()).then(res => {
-                        if (res.status === 'success') {
-                            let serverMaster = res.rawMaster;
-                            let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                            let newPending = [];
-                            let waktuSekarangMs = Date.now();
-
-                            for (let p of pendingMaster) {
-                                let foundIdx = serverMaster.findIndex(s => s.tgl === p.tgl && s.relasi.toLowerCase() === p.relasi.toLowerCase() && s.pakan === p.pakan && s.qty === p.qty);
-                                if (foundIdx !== -1) { serverMaster[foundIdx].matched = true; } else { if (waktuSekarangMs - p.timestamp < 7200000) { newPending.push(p); } }
-                            }
-                            serverMaster.forEach(s => delete s.matched);
-                            localStorage.setItem('pending_master_data', JSON.stringify(newPending));
-                            let waktuSekarang = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-                            localStorage.setItem(cacheKey, JSON.stringify({ rawMaster: serverMaster, rawCashflow: res.rawCashflow, waktuTarik: waktuSekarang }));
-                            currentBulan = bulan; currentTahun = tahun; rawCashflowGlobal = res.rawCashflow;
-                            let currentPending = newPending.filter(x => x.tgl.startsWith(`${tahun}-${("0" + bulan).slice(-2)}`));
-                            rawMasterGlobal = [...serverMaster, ...currentPending];
-
-                            document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">cloud_done</span> Data Server: ditarik ${waktuSekarang}`;
-                            document.getElementById('info-cache').style.color = "#8AA624";
-                            let activeDate = document.querySelector('.cal-day.selected'); let activeDateId = activeDate ? activeDate.id.replace('cal-', '') : null;
-                            terapkanFilter(); if (activeDateId) klikTanggalMaster(activeDateId);
-                        } else { if (!savedData) document.getElementById('rekap-hasil').innerHTML = `<div style="color:red; text-align:center;">Gagal: ${res.message}</div>`; }
-                    }).catch(e => {
-                        if (!savedData) document.getElementById('rekap-hasil').innerHTML = '<div style="color:red; text-align:center;">Kesalahan jaringan.</div>';
-                        document.getElementById('info-cache').innerText = "Koneksi lambat, memakai data lokal."; document.getElementById('info-cache').style.color = "#888";
-                    });
+                return;
             }
+
+            if (!navigator.onLine) { 
+                if (!savedData) alert("Data bulan ini belum ada di HP. Butuh koneksi internet untuk menarik pertama kali!"); 
+                return; 
+            }
+
+            // Bersihkan layar untuk menyambut data baru
+            document.getElementById('rekap-summary-container').innerHTML = ""; 
+            document.getElementById('rekap-calendar').classList.add('hidden'); 
+            document.getElementById('btn-copy-rekap').classList.add('hidden');
+            document.getElementById('rekap-hasil').innerHTML = '<div class="loader">Menarik Database dari Supabase...</div>';
+            document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:14px; vertical-align:middle;">sync</span> Menyinkronkan data...`; 
+            document.getElementById('info-cache').style.color = "#FEA405";
+
+            // Siapkan parameter rentang waktu untuk Supabase (1 Bulan Full)
+            let startDate = `${tahun}-${("0" + bulan).slice(-2)}-01`;
+            let endDate = new Date(tahun, bulan, 0).toISOString().split('T')[0];
+
+            // 🚀 TEMBAK KE DUA TABEL SEKALIGUS (TRANSAKSI PAKAN & CASHFLOW)
+            Promise.all([
+                fetch(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, {
+                    headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
+                }).then(r => r.json()),
+                fetch(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, {
+                    headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
+                }).then(r => r.json())
+            ])
+            .then(([masterData, cfData]) => {
+                if (masterData.error || cfData.error) {
+                    throw new Error(masterData.message || cfData.message);
+                }
+
+                // 1. TERJEMAHKAN MASTER PAKAN KE FORMAT DASHBOARD PWA
+                let serverMaster = masterData.map(row => {
+                    let cKat = "Penjualan";
+                    let cGroup = "Keluar";
+                    let namaRelasi = String(row.relasi).toLowerCase();
+                    let catatanLengkap = String(row.catatan || "").toLowerCase();
+
+                    // Mesin Akuntan PWA (Otomatis Menggolongkan Transaksi)
+                    if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) {
+                        cKat = "Giling"; cGroup = "Keluar";
+                    } else if (String(row.status).toLowerCase().includes("masuk")) {
+                        cGroup = "Masuk";
+                        if (catatanLengkap.includes("gudang")) cKat = "Mutasi";
+                        else cKat = "Masuk";
+                    } else {
+                        if (String(row.cabang).toLowerCase().includes('kandang')) cKat = "Pemakaian";
+                        else if (namaRelasi.includes("kandang") || namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) cKat = "Mutasi";
+                        else cKat = "Penjualan";
+                    }
+
+                    return {
+                        tgl: row.tanggal,
+                        gudang: row.cabang,
+                        kat: cKat,
+                        catGroup: cGroup,
+                        status: row.status,
+                        relasi: row.relasi,
+                        pakan: row.pakan_kategori || row.pakan,
+                        qty: parseFloat(row.qty) || 0,
+                        isPending: false,
+                        timestamp: new Date(row.waktu_input || row.tanggal).getTime()
+                    };
+                });
+
+                // 2. TERJEMAHKAN CASHFLOW KE FORMAT DASHBOARD PWA
+                let serverCF = cfData.map(row => {
+                    let isMasuk = String(row.jenis).toLowerCase().includes("masuk");
+                    return {
+                        tgl: row.tanggal,
+                        metode: row.metode || "Cash",
+                        katCF: row.kategori || "Lainnya",
+                        relasi: row.relasi || "-",
+                        debet: isMasuk ? parseFloat(row.nominal) : 0,
+                        kredit: !isMasuk ? parseFloat(row.nominal) : 0,
+                        isPending: false
+                    };
+                });
+
+                // --- PEMBERSIH HANTU PENDING / DATA LOKAL GANDA ---
+                let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
+                let newPending = [];
+                let waktuSekarangMs = Date.now();
+
+                for (let p of pendingMaster) {
+                    let foundIdx = serverMaster.findIndex(s => s.tgl === p.tgl && s.relasi.toLowerCase() === p.relasi.toLowerCase() && s.pakan === p.pakan && s.qty === p.qty);
+                    // Jika data belum ada di server DAN umurnya masih kurang dari 2 Jam, biarkan di pending (Optimistic UI)
+                    if (foundIdx === -1 && (waktuSekarangMs - p.timestamp < 7200000)) { 
+                        newPending.push(p); 
+                    }
+                }
+                localStorage.setItem('pending_master_data', JSON.stringify(newPending));
+
+                // BUNGKUS DAN SIMPAN KE MEMORI HP
+                let waktuSekarang = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+                localStorage.setItem(cacheKey, JSON.stringify({ rawMaster: serverMaster, rawCashflow: serverCF, waktuTarik: waktuSekarang }));
+                
+                currentBulan = bulan; currentTahun = tahun; rawCashflowGlobal = serverCF;
+                let currentPending = newPending.filter(x => x.tgl.startsWith(`${tahun}-${("0" + bulan).slice(-2)}`));
+                rawMasterGlobal = [...serverMaster, ...currentPending];
+
+                document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">cloud_done</span> Data Supabase: ditarik ${waktuSekarang}`;
+                document.getElementById('info-cache').style.color = "#8AA624";
+                
+                // Eksekusi Render Layar!
+                terapkanFilter(); 
+                
+                // Buka kembali tanggal yang sedang diklik user (kalau ada)
+                let activeDate = document.querySelector('.cal-day.selected'); 
+                let activeDateId = activeDate ? activeDate.id.replace('cal-', '') : null;
+                if (activeDateId) klikTanggalMaster(activeDateId);
+
+            })
+            .catch(e => {
+                document.getElementById('rekap-hasil').innerHTML = `<div style="color:red; text-align:center;">Gagal memuat: ${e.message}</div>`;
+                document.getElementById('info-cache').innerText = "Gagal menyinkronkan data."; 
+                document.getElementById('info-cache').style.color = "red";
+            });
         }
 
         function terapkanFilter() {
