@@ -4165,7 +4165,6 @@ async function prosesAntreanBackground() {
                     hashStr: `KOREKSITX_${pakan}_${qty}_${timeHash}`
                 };
 
-                if (typeof simpanOfflineSync === 'function') simpanOfflineSync(payloadKoreksi);
                 if (f_fasilitas === "/kandang" || f_fasilitas === "/spn_kandang") {
                     if (globalStokKandang[pakan] === undefined) globalStokKandang[pakan] = 0;
                     if (f_sifat === "Masuk") globalStokKandang[pakan] += qty;
@@ -4176,6 +4175,7 @@ async function prosesAntreanBackground() {
                     renderMiniDashboardKandang();
                 }
 
+                suntikCacheOptimistic(payloadKoreksi);
                 simpanKeAntrianLokal(payloadKoreksi);
                 alert("✅ Koreksi Laporan berhasil dicatat!");
 
@@ -5739,6 +5739,7 @@ async function prosesAntreanBackground() {
 
                     let pesanWA = `Yth. Bapak/Ibu ${namaP},\nBerikut kami lampirkan invoice tagihan pakan dengan rincian:\n• Nama Peternak: *${namaP}*\n• Total Tagihan: *Rp ${nf.format(totalTagihan)}*\n• Periode Pengambilan: *${periodeTgl}*\nMohon kesediaannya untuk mengecek lampiran tersebut. Silakan konfirmasi jika terdapat kekeliruan data. Terima kasih.`;
 
+                    // Tambahin info lunas kalau dia bayar tunai full
                     if (isCashIn && nominalCashIn == totalTagihan) {
                         pesanWA = `Yth. Bapak/Ibu ${namaP},\nBerikut kami lampirkan Invoice sekaligus kwitansi lunas atas pengambilan pakan periode *${periodeTgl}* senilai *Rp ${nf.format(totalTagihan)}*. Terima kasih banyak atas pembayarannya.`;
                     }
@@ -5991,6 +5992,7 @@ async function prosesAntreanBackground() {
             localStorage.setItem('stok_kandang_ptcbl', JSON.stringify(globalStokKandang));
             
             setTimeout(() => {
+                suntikCacheOptimistic(payloadFlush);
                 simpanKeAntrianLokal(payloadFlush);
                 loader.classList.add('hidden');
                 renderMiniDashboardKandang();
