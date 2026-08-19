@@ -5751,6 +5751,7 @@ async function prosesAntreanBackground() {
                 modal.style.position = oriModalPos; wrapper.style.overflowX = oriWrapperOverflow; wrapper.style.WebkitOverflowScrolling = oriWrapperScrolling;
                 statusLabel.innerText = "⚠️ Gagal mencetak dokumen."; console.log(e);
             }
+        }
 
         function getLokasiAktif() {
             let u = document.querySelector('input[name="lokasi_utama"]:checked').value;
