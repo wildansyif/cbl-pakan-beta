@@ -4479,7 +4479,12 @@ async function prosesAntreanBackground() {
                     let pakan = row.pakan || 'Pakan'; 
                     let qty = parseFloat(row.qty) || 0;
                     let omzet = qty * (parseFloat(row.harga_satuan) || 0);
-                    let hpp = qty * (hppDict[pakan] || 0);
+                    
+                    // 🔥 PERBAIKAN: Berhenti menebak! Ambil langsung hasil hitungan FIFO dari Supabase
+                    let hpp = 0;
+                    if (cGroup === "keluar") {
+                        hpp = parseFloat(row.total_hpp) || 0;
+                    }
 
                     return {
                         bln: tglObj.getMonth() + 1,
