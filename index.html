@@ -8159,108 +8159,98 @@ async function prosesAntreanBackground() {
             let end = document.getElementById('giling_end').value;
 
             if (!start || !end) return alert("Pilih tanggal awal dan akhir!");
-            if (new Date(start) > new Date(end)) return alert("Tanggal akhir tidak boleh lebih kecil dari awal!");
-
-            let startDateObj = new Date(start); startDateObj.setHours(0, 0, 0, 0);
-            let endDateObj = new Date(end); endDateObj.setHours(23, 59, 59, 999);
+            if (start > end) return alert("Tanggal akhir tidak boleh lebih kecil dari awal!");
 
             let btn = document.querySelector('#page-giling .btn-submit');
-            let oriTxt = btn.innerHTML;
+            let oriTxt = `<span class="material-symbols-outlined" style="font-size:16px;">search</span> Tarik Rincian`;
 
-            // 1. FUNGSI RENDER LOKAL (MUNCUL DALAM 0 DETIK)
-            const renderLokal = (serverData) => {
-                let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                let mappedPending = [];
-
-                pendingMaster.forEach(p => {
-                    let relasiRaw = String(p.relasi).toUpperCase();
-                    let isGilingan = relasiRaw.includes('RD') || relasiRaw.includes('RL') || relasiRaw.includes('DARBUN') || relasiRaw.includes('LAKTASI');
-
-                    if (isGilingan) {
-                        let pTglArr = p.tgl.split('-'); // Format pending yyyy-MM-dd
-                        if (pTglArr.length === 3) {
-                            let pTglObj = new Date(pTglArr[0], pTglArr[1] - 1, pTglArr[2]);
-                            if (pTglObj >= startDateObj && pTglObj <= endDateObj) {
-                                let relasiClean = (relasiRaw.includes('RD') || relasiRaw.includes('DARBUN')) ? 'RD' : 'RL';
-                                mappedPending.push({
-                                    tglMs: pTglObj.getTime(),
-                                    tglStr: `${pTglArr[2]}/${pTglArr[1]}/${pTglArr[0]}`,
-                                    status: p.status || "Keluar",
-                                    relasi: relasiClean,
-                                    pakan: p.pakan,
-                                    qty: p.qty,
-                                    isPending: true
-                                });
-                            }
-                        }
-                    }
-                });
-
-                // Ambil cache server lalu saring sesuai rentang tanggal
-                let filteredServer = (serverData || []).filter(d => d.tglMs >= startDateObj.getTime() && d.tglMs <= endDateObj.getTime());
-
-                globalGilingData = [...filteredServer, ...mappedPending];
-                renderGilingUI();
-                document.getElementById('giling-result').classList.remove('hidden');
-            };
-
-            // EKSEKUSI TAMPIL INSTAN! (Dari cache memori HP)
-            let cacheKey = "cache_giling_master";
-            let cachedData = JSON.parse(localStorage.getItem(cacheKey) || "[]");
-            renderLokal(cachedData);
-
-            if (!navigator.onLine) return; // Jika offline, stop sampai di sini (hanya mode baca lokal)
-
-            // 2. MINTA DATA FRESH KE SERVER (DIAM-DIAM DI LATAR BELAKANG)
-            if (!isSilent) {
+            if (!isSilent && btn) {
                 btn.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:16px;">sync</span> Menyelaraskan...`;
                 btn.disabled = true;
             }
 
-            fetch(API_URL, {
-                method: 'POST',
-                body: JSON.stringify({ source: 'tarik_giling', startDate: start, endDate: end })
-            }).then(r => r.json()).then(res => {
-                if (!isSilent) { btn.innerHTML = oriTxt; btn.disabled = false; }
+            let cacheKey = `giling_supa_${start}_${end}`;
+            let cached = localStorage.getItem(cacheKey);
 
-                if (res.status === 'success') {
-                    let newServerData = res.data;
-                    let existingCache = JSON.parse(localStorage.getItem(cacheKey) || "[]");
-
-                    // Hapus cache lama yang rentang tanggalnya bertabrakan, ganti dengan yang fresh dari server
-                    existingCache = existingCache.filter(c => c.tglMs < startDateObj.getTime() || c.tglMs > endDateObj.getTime());
-                    let mergedCache = [...existingCache, ...newServerData];
-
-                    // Update Memori HP
-                    localStorage.setItem(cacheKey, JSON.stringify(mergedCache));
-
-                    // --- PEMBERSIH HANTU PENDING (Ghost Cache) ---
-                    let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                    let freshPending = [];
-                    for (let p of pendingMaster) {
-                        let isGilingan = String(p.relasi).toUpperCase().includes('RD') || String(p.relasi).toUpperCase().includes('RL') || String(p.relasi).toUpperCase().includes('DARBUN');
-                        if (isGilingan) {
-                            let match = newServerData.some(srv =>
-                                String(srv.tglStr).substring(0, 5) === p.tgl.substring(8, 10) + "/" + p.tgl.substring(5, 7) &&
-                                String(srv.pakan).trim() === String(p.pakan).trim() &&
-                                parseFloat(srv.qty) === parseFloat(p.qty)
-                            );
-                            if (!match) freshPending.push(p);
-                        } else {
-                            freshPending.push(p);
-                        }
-                    }
-                    localStorage.setItem('pending_master_data', JSON.stringify(freshPending));
-                    // ---------------------------------------------
-
-                    // Render ulang UI diam-diam
-                    renderLokal(mergedCache);
+            // JIKA OFFLINE: Gunakan cache lokal
+            if (!navigator.onLine) {
+                if (!isSilent && btn) { btn.innerHTML = oriTxt; btn.disabled = false; }
+                if (cached) {
+                    globalGilingData = JSON.parse(cached);
+                    renderGilingUI();
+                    document.getElementById('giling-result').classList.remove('hidden');
                 } else {
-                    if (!isSilent) alert("Gagal Sync: " + res.message);
+                    alert("Sedang offline dan belum ada data tersimpan di HP untuk periode ini.");
                 }
-            }).catch(e => {
-                if (!isSilent) { btn.innerHTML = oriTxt; btn.disabled = false; }
-                console.log("Error Sync Giling: ", e.message);
+                return;
+            }
+
+            // 🚀 TEMBAK MURNI KE SUPABASE (TRANSAKSI PAKAN SPN)
+            fetch(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${start}&tanggal=lte.${end}&select=*`, {
+                headers: { 
+                    'apikey': SUPA_ANON_KEY, 
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}` 
+                }
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!isSilent && btn) { btn.innerHTML = oriTxt; btn.disabled = false; }
+                if (!Array.isArray(data)) throw new Error(data.message || "Gagal memuat data dari Supabase");
+
+                let serverData = [];
+                data.forEach(row => {
+                    let relasiRaw = String(row.relasi || "").toUpperCase();
+                    let isGilingan = relasiRaw.includes('RD') || relasiRaw.includes('RL') || relasiRaw.includes('DARBUN') || relasiRaw.includes('LAKTASI');
+
+                    if (isGilingan) {
+                        let tglParts = String(row.tanggal).split('-');
+                        let tglStr = tglParts.length === 3 ? `${tglParts[2]}/${tglParts[1]}/${tglParts[0]}` : row.tanggal;
+                        let relasiClean = (relasiRaw.includes('RD') || relasiRaw.includes('DARBUN')) ? 'RD' : 'RL';
+
+                        serverData.push({
+                            tglMs: new Date(row.tanggal).getTime(),
+                            tglStr: tglStr,
+                            status: row.status || 'Keluar',
+                            relasi: relasiClean,
+                            pakan: row.pakan,
+                            qty: parseFloat(row.qty) || 0,
+                            isPending: false
+                        });
+                    }
+                });
+
+                // Gabungkan dengan antrean koreksi yang baru saja dibuat di HP (Optimistic UI)
+                let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
+                let pendingGiling = [];
+                pendingMaster.forEach(p => {
+                    let relasiRaw = String(p.relasi || "").toUpperCase();
+                    let isGilingan = relasiRaw.includes('RD') || relasiRaw.includes('RL') || relasiRaw.includes('DARBUN') || relasiRaw.includes('LAKTASI');
+                    if (isGilingan && p.tgl >= start && p.tgl <= end) {
+                        let tglParts = String(p.tgl).split('-');
+                        let tglStr = tglParts.length === 3 ? `${tglParts[2]}/${tglParts[1]}/${tglParts[0]}` : p.tgl;
+                        let relasiClean = (relasiRaw.includes('RD') || relasiRaw.includes('DARBUN')) ? 'RD' : 'RL';
+                        pendingGiling.push({
+                            tglMs: new Date(p.tgl).getTime(),
+                            tglStr: tglStr,
+                            status: p.status || 'Keluar',
+                            relasi: relasiClean,
+                            pakan: p.pakan,
+                            qty: parseFloat(p.qty) || 0,
+                            isPending: true
+                        });
+                    }
+                });
+
+                globalGilingData = [...serverData, ...pendingGiling];
+                localStorage.setItem(cacheKey, JSON.stringify(globalGilingData));
+                
+                renderGilingUI();
+                document.getElementById('giling-result').classList.remove('hidden');
+            })
+            .catch(e => {
+                if (!isSilent && btn) { btn.innerHTML = oriTxt; btn.disabled = false; }
+                console.error("Error Giling:", e);
+                if (!isSilent) alert("Gagal menyinkronkan data giling: " + e.message);
             });
         }
 
