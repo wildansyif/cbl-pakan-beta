@@ -4273,22 +4273,30 @@ async function prosesAntreanBackground() {
                     if (kategoriArr.includes("ALL")) pass = true;
                     else {
                         if (kategoriArr.includes("Penjualan & Mutasi") && (row.kat === "Penjualan" || row.kat === "Mutasi")) pass = true;
-                        if (kategoriArr.includes("Masuk") && row.catGroup === "Masuk") pass = true;
+                        if (kategoriArr.includes("Masuk") && row.kat === "Masuk") pass = true;
                         if (kategoriArr.includes("Pemakaian") && row.kat === "Pemakaian") pass = true;
                         if (kategoriArr.includes("Giling") && row.kat === "Giling") pass = true;
                     }
                     if (!pass) return;
-                    if (row.kat === "Penjualan") summary.penjualan += row.qty; if (row.kat === "Mutasi") summary.mutasi += row.qty; if (row.catGroup === "Masuk") summary.masuk += row.qty; if (row.kat === "Giling") summary.giling += row.qty;
+                    
+                    if (row.kat === "Penjualan") summary.penjualan += row.qty; 
+                    if (row.kat === "Mutasi") summary.mutasi += row.qty; 
+                    if (row.kat === "Masuk") summary.masuk += row.qty; 
+                    if (row.kat === "Giling") summary.giling += row.qty;
+                    
                     if (!globalDataBulan[row.tgl]) globalDataBulan[row.tgl] = { isCashflow: false, dots: {}, items: {} };
+                    
                     if (row.kat === "Penjualan" || row.kat === "Mutasi") globalDataBulan[row.tgl].dots.green = true;
-                    if (row.catGroup === "Masuk") globalDataBulan[row.tgl].dots.yellow = true;
+                    if (row.kat === "Masuk") globalDataBulan[row.tgl].dots.yellow = true;
                     if (row.kat === "Pemakaian") globalDataBulan[row.tgl].dots.blue = true;
                     if (row.kat === "Giling") globalDataBulan[row.tgl].dots.purple = true;
-                    if (!globalDataBulan[row.tgl].items[row.catGroup]) globalDataBulan[row.tgl].items[row.catGroup] = {};
-                    if (!globalDataBulan[row.tgl].items[row.catGroup][row.relasi]) globalDataBulan[row.tgl].items[row.catGroup][row.relasi] = [];
+                    
+                    // 🔥 PERBAIKAN: Grouping layar ditarik dari "kat", bukan catGroup lagi!
+                    if (!globalDataBulan[row.tgl].items[row.kat]) globalDataBulan[row.tgl].items[row.kat] = {};
+                    if (!globalDataBulan[row.tgl].items[row.kat][row.relasi]) globalDataBulan[row.tgl].items[row.kat][row.relasi] = [];
 
-                    let exist = globalDataBulan[row.tgl].items[row.catGroup][row.relasi].find(x => x.pakan === row.pakan && x.isPending === row.isPending);
-                    if (exist) { exist.qty += row.qty; } else { globalDataBulan[row.tgl].items[row.catGroup][row.relasi].push({ pakan: row.pakan, qty: row.qty, isPending: row.isPending, timestamp: row.timestamp }); }
+                    let exist = globalDataBulan[row.tgl].items[row.kat][row.relasi].find(x => x.pakan === row.pakan && x.isPending === row.isPending);
+                    if (exist) { exist.qty += row.qty; } else { globalDataBulan[row.tgl].items[row.kat][row.relasi].push({ pakan: row.pakan, qty: row.qty, isPending: row.isPending, timestamp: row.timestamp }); }
                 });
             }
             renderMonthlySummary(summary, kategoriArr, currentBulan, currentTahun); renderCalendar(currentBulan, currentTahun, kategoriArr);
@@ -4451,35 +4459,31 @@ async function prosesAntreanBackground() {
                 let rawMaster = masterData.map(row => {
                     let tglObj = new Date(row.tanggal);
                     let namaRelasi = String(row.relasi).toLowerCase();
-                    let cKat = "penjualan", cGroup = "keluar";
+                    let catatanLengkap = String(row.catatan || "").toLowerCase();
+                    let cKat = "Penjualan";
 
-                    if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) {
-                        cKat = "giling"; cGroup = "keluar";
-                    } else if (String(row.status).toLowerCase().includes("masuk")) {
-                        cGroup = "masuk";
-                        cKat = String(row.catatan||"").toLowerCase().includes("gudang") ? "mutasi" : "masuk";
+                    // 🔥 LOGIKA KATEGORISASI BARU YANG LEBIH CERDAS
+                    if (String(row.status).toLowerCase().includes("masuk")) {
+                        if (catatanLengkap.includes("gudang") || namaRelasi.includes("mutasi")) cKat = "Mutasi";
+                        else cKat = "Masuk";
                     } else {
-                        if (String(row.cabang).toLowerCase().includes('kandang')) cKat = "pemakaian";
-                        else if (namaRelasi.includes("kandang") || namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) cKat = "mutasi";
-                        else cKat = "penjualan";
+                        if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) cKat = "Giling";
+                        else if (String(row.cabang).toLowerCase().includes('kandang') || namaRelasi.includes("kandang")) cKat = "Pemakaian";
+                        else if (namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) cKat = "Mutasi";
+                        else cKat = "Penjualan";
                     }
 
                     let pakan = row.pakan || 'Pakan'; 
                     let qty = parseFloat(row.qty) || 0;
                     let omzet = qty * (parseFloat(row.harga_satuan) || 0);
-                    
-                    // 🔥 PERBAIKAN FINAL: Ambil HPP matang dari mesin FIFO Supabase Bapak!
-                    let hpp = 0;
-                    if (cGroup === "keluar") {
-                        hpp = parseFloat(row.total_hpp) || 0;
-                    }
+                    let hpp = String(row.status).toLowerCase().includes('keluar') ? (parseFloat(row.total_hpp) || 0) : 0;
 
                     return {
                         bln: tglObj.getMonth() + 1,
                         tglDb: tglObj.getDate(),
                         gudang: row.cabang || 'PM',
                         kat: cKat,
-                        catGroup: cGroup,
+                        catGroup: cKat, // Disamakan agar tidak ada bug "KATEGORI: KELUAR"
                         status: String(row.status).toLowerCase(),
                         pakan: pakan,
                         qty: qty,
@@ -6575,22 +6579,15 @@ async function prosesAntreanBackground() {
                 let namaOngkir = payload.ongkir ? payload.ongkir.toLowerCase() : "";
                 let cKat = "Penjualan";
 
-                if (namaRelasi.includes("rd") || namaRelasi.includes("rl")) {
-                    cKat = "Giling";
-                } else if (payload.status === "Masuk" || payload.status === "Masuk (Retur)") {
-                    if (namaOngkir.includes("pm gudang") || namaOngkir.includes("spn gudang") || namaOngkir.includes("rph gudang")) {
-                        cKat = "Mutasi";
-                    } else {
-                        cKat = "Masuk";
-                    }
+                // 🔥 LOGIKA LOKAL DIJADIKAN IDENTIK DENGAN LOGIKA SERVER
+                if (payload.status === "Masuk" || payload.status === "Masuk (Retur)") {
+                    if (namaOngkir.includes("gudang") || namaRelasi.includes("mutasi")) cKat = "Mutasi";
+                    else cKat = "Masuk";
                 } else {
-                    if (payload.lokasi === '/kandang') {
-                        cKat = "Pemakaian";
-                    } else if (namaRelasi.includes("kandang") || namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) {
-                        cKat = "Mutasi";
-                    } else {
-                        cKat = "Penjualan";
-                    }
+                    if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) cKat = "Giling";
+                    else if (payload.lokasi === '/kandang' || namaRelasi.includes("kandang")) cKat = "Pemakaian";
+                    else if (namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) cKat = "Mutasi";
+                    else cKat = "Penjualan";
                 }
 
                 let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
