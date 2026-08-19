@@ -4959,12 +4959,19 @@ async function prosesAntreanBackground() {
                 let hariIni = new Date();
                 hariIni.setHours(0, 0, 0, 0);
 
-                // 1. PISAHKAN TAGIHAN DAN PEMBAYARAN PER KONSUMEN
                 let rawByRelasi = {};
 
                 data.forEach(row => {
-                    let r = row.relasi;
+                    let r = String(row.relasi || "").trim();
                     if (!r || r === "-") return;
+
+                    // 🔥 FILTER SAKTI: Usir relasi internal & non-konsumen dari Menu Piutang!
+                    let rLower = r.toLowerCase();
+                    if (rLower.includes('rd') || rLower.includes('rl') || rLower.includes('pembibitan') || 
+                        rLower.includes('spn') || rLower.includes('rph') || rLower.includes('cibulakan') || 
+                        rLower.includes('kandang')) {
+                        return; // Langsung di-skip, tidak akan digubris oleh mesin Piutang
+                    }
                     
                     if (!rawByRelasi[r]) {
                         rawByRelasi[r] = { tagihan: [], bayar: [], alamat: row.alamat || '-' };
