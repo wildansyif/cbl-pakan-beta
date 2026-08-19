@@ -1791,16 +1791,14 @@
                 </div>
 
                 <div id="view-stok-blok" class="stok-view hidden">
-                    <div
-                        style="background:#FFFFF0; border:1px dashed #FEA405; padding:10px; border-radius:8px; font-size:11px; color:#555; margin-bottom:15px; text-align:center;">
+                    <div style="background:#FFFFF0; border:1px dashed #FEA405; padding:10px; border-radius:8px; font-size:11px; color:#555; margin-bottom:15px; text-align:center;">
                         Rincian sisa pakan yang tersimpan di dalam masing-masing blok.
                     </div>
                     <div id="list-peta-blok"></div>
                 </div>
 
                 <div id="view-stok-laporan" class="stok-view hidden">
-                    <div class="form-row"
-                        style="margin-bottom:15px; gap:5px; background:#f5f5f5; padding:10px; border-radius:8px;">
+                    <div class="form-row" style="margin-bottom:15px; gap:5px; background:#f5f5f5; padding:10px; border-radius:8px;">
                         <div style="flex:1.5;">
                             <label style="font-size:10px; margin-bottom:2px;">Sisa Stok Bulan Masuk:</label>
                             <select id="kapling_bulan" onchange="renderLapKapling()"
@@ -1819,13 +1817,6 @@
                                 <option value="12">Desember</option>
                             </select>
                         </div>
-
-                        <div id="view-stok-po" class="stok-view hidden">
-                    <div style="background:#FFFFF0; border:1px dashed #FEA405; padding:10px; border-radius:8px; font-size:11px; color:#555; margin-bottom:15px; text-align:center;">
-                        Estimasi kebutuhan dan saran Purchase Order (PO) berdasarkan pemakaian aktual 15 hari ke belakang.
-                    </div>
-                    <div id="list-po-container"></div>
-                </div>
                         <div style="flex:1;">
                             <label style="font-size:10px; margin-bottom:2px;">Tahun:</label>
                             <select id="kapling_tahun" onchange="renderLapKapling()"
@@ -1835,14 +1826,38 @@
                             </select>
                         </div>
                     </div>
-
                     <div id="list-kapling">
-                        <div style="text-align:center; color:#888; font-size:12px; padding:20px;">Tarik data untuk
-                            memuat laporan kapling.</div>
+                        <div style="text-align:center; color:#888; font-size:12px; padding:20px;">Tarik data untuk memuat laporan kapling.</div>
                     </div>
                 </div>
-            </div>
-        </div>
+
+                <!-- 🔥 WADAH RENCANA PO YANG BENAR 🔥 -->
+                <div id="view-stok-po" class="stok-view hidden">
+                    <div class="form-row" style="margin-bottom:15px; background:#f5f5f5; padding:10px; border-radius:8px; gap:8px;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px;">Dari Tanggal</label>
+                            <input type="date" id="po_start" style="padding:8px; font-size:12px; width:100%;">
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-size:10px;">Sampai Tanggal</label>
+                            <input type="date" id="po_end" style="padding:8px; font-size:12px; width:100%;">
+                        </div>
+                        <div style="flex:0.4; display:flex; align-items:flex-end;">
+                            <button class="btn-submit" onclick="tarikDataPO()" style="margin:0; background:#8AA624; width:100%; padding:10px; height:37px;">
+                                <span class="material-symbols-outlined" style="font-size:16px;">search</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="po-loader" class="loader hidden">Merumuskan Rencana PO...</div>
+                    <div id="list-po-container">
+                        <div style='text-align:center; color:#888; font-size:12px; padding:20px; border:1px dashed #ccc; border-radius:8px;'>
+                            👆 Tentukan rentang tanggal dan klik ikon cari.
+                        </div>
+                    </div>
+                </div>
+
+            </div> <!-- PENUTUP stok-content-area -->
 
         <div id="page-rekap" class="container hidden">
             <h2 style="display:flex; justify-content:center; align-items:center; gap:8px;">
@@ -3075,33 +3090,32 @@
             document.getElementById('list-radar-pakan').innerHTML = "";
             document.getElementById('list-peta-blok').innerHTML = "";
             document.getElementById('list-kapling').innerHTML = "";
-            if (document.getElementById('list-po-container')) document.getElementById('list-po-container').innerHTML = "";
 
             if (!navigator.onLine) {
                 document.getElementById('stok-loader').classList.add('hidden');
-                alert("Wajib online untuk melihat stok & Rencana PO terkini!");
+                alert("Wajib online untuk melihat stok terkini!");
                 return;
             }
 
-            // 🚀 TEMBAK 3 TABEL SEKALIGUS (Stok, Master Pakan, dan Kacamata PO)
+            // Set Tanggal Default PO (15 Hari ke belakang) saat pertama kali buka
+            let endPO = new Date();
+            let startPO = new Date(); startPO.setDate(endPO.getDate() - 15);
+            document.getElementById('po_end').valueAsDate = endPO;
+            document.getElementById('po_start').valueAsDate = startPO;
+
+            // 🚀 TEMBAK HANYA STOK BATCH & MASTER PAKAN (Estimasi PO ditarik pakai tombol Cari)
             Promise.all([
                 fetch(`${SUPA_URL}/rest/v1/stok_batch?qty_sisa=gt.0&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
-                fetch(`${SUPA_URL}/rest/v1/master_pakan?select=jenis_pakan,min_stok`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
-                fetch(`${SUPA_URL}/rest/v1/view_estimasi_po?select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
+                fetch(`${SUPA_URL}/rest/v1/master_pakan?select=jenis_pakan,min_stok`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
             ])
-            .then(([stokData, masterPakan, poData]) => {
+            .then(([stokData, masterPakan]) => {
                 document.getElementById('stok-loader').classList.add('hidden');
                 
-                // 1. Simpan Kamus Batas Alarm (Batas Minimal dari Supabase)
                 window.minStokDict = {};
                 if(Array.isArray(masterPakan)) {
                     masterPakan.forEach(m => window.minStokDict[m.jenis_pakan] = m.min_stok || 500);
                 }
 
-                // 2. Simpan Data Rencana PO di memori
-                window.globalDataPO = Array.isArray(poData) ? poData : [];
-
-                // 3. Format/Map data Supabase agar dimengerti oleh PWA
                 globalDataStok = stokData.map(s => ({
                     gudang: s.cabang,
                     blok: s.blok || 'Tanpa Blok',
@@ -3113,24 +3127,13 @@
                 
                 populateDropdownStok();
                 renderListStokV5();
+                
+                // Auto-run tarik PO agar tidak blank saat baru buka
+                tarikDataPO();
             }).catch(e => {
                 document.getElementById('stok-loader').classList.add('hidden');
                 alert("Error jaringan: " + e.message);
             });
-        }
-
-        function populateDropdownStok() {
-            let pakanSet = new Set();
-            let blokSet = new Set();
-            globalDataStok.forEach(s => { pakanSet.add(s.pakan); blokSet.add(s.blok); });
-
-            globalPakanListStok = Array.from(pakanSet).sort();
-
-            let blokHtml = '<option value="ALL">Semua Blok</option>';
-            Array.from(blokSet).sort().forEach(b => blokHtml += `<option value="${b}">${b}</option>`);
-            let oldBlok = document.getElementById('filter-blok').value;
-            document.getElementById('filter-blok').innerHTML = blokHtml;
-            if (blokSet.has(oldBlok)) document.getElementById('filter-blok').value = oldBlok;
         }
 
         function renderListStokV5() {
@@ -3159,7 +3162,6 @@
 
             let htmlPakan = ""; let htmlAlarm = "";
             let nf = new Intl.NumberFormat('id-ID');
-            let today = new Date().getTime();
 
             // 🔥 LOGIKA ALARM PINTAR (Cek Per Gudang, Diringkas Per Pakan)
             let stockPerGudangPakan = {};
@@ -3176,14 +3178,12 @@
                 if (gdg !== "ALL" && d.gudang !== gdg) continue; 
                 let minAman = window.minStokDict ? (window.minStokDict[d.pakan] || 500) : 500;
                 
-                // Jika Kritis, masukkan ke kelompok namanya
                 if (d.total <= minAman) {
                     if (!alarmGroups[d.pakan]) alarmGroups[d.pakan] = { min: minAman, locs: [] };
                     alarmGroups[d.pakan].locs.push(`<b>${d.gudang}</b> (${nf.format(d.total)} Kg)`);
                 }
             }
 
-            // Render Banner Alarm secara Horizontal
             for (let p in alarmGroups) {
                 let info = alarmGroups[p];
                 htmlAlarm += `
@@ -3257,7 +3257,6 @@
             document.getElementById('alarm-kritis-container').innerHTML = htmlAlarm;
             document.getElementById('list-radar-pakan').innerHTML = htmlPakan || "<div style='text-align:center; font-size:12px; color:#888; padding:20px;'>Pakan tidak ditemukan.</div>";
 
-            // (Kode Render Peta Blok dst. tetap sama)
             let htmlBlok = "";
             let sortedBlok = Object.keys(groupedBlok).sort();
             sortedBlok.forEach((blok, idx) => {
@@ -3293,105 +3292,115 @@
             document.getElementById('list-peta-blok').innerHTML = htmlBlok || "<div style='text-align:center; font-size:12px; color:#888;'>Blok kosong.</div>";
 
             renderLapKapling();
-            
-            // 🔥 PANGGIL RENDER TAB PO
-            if(typeof renderRencanaPO === 'function') renderRencanaPO();
         }
 
-        function renderRencanaPO() {
+        // ============================================
+        // MESIN PERAMAL PO BARU (DENGAN TANGGAL DINAMIS)
+        // ============================================
+        function tarikDataPO() {
+            let start = document.getElementById('po_start').value;
+            let end = document.getElementById('po_end').value;
+
+            if (!start || !end) return alert("Pilih tanggal awal dan akhir!");
+            if (start > end) return alert("Tanggal akhir tidak boleh lebih kecil dari awal!");
+
             let container = document.getElementById('list-po-container');
+            let loader = document.getElementById('po-loader');
             
-            // 🔥 FOOL-PROOF: Bikin wadah otomatis kalau HTML-nya kehapus/kurang
-            if (!container) {
-                let parentArea = document.getElementById('stok-content-area');
-                if (parentArea) {
-                    let poView = document.createElement('div');
-                    poView.id = "view-stok-po";
-                    poView.className = "stok-view hidden";
-                    poView.innerHTML = `
-                        <div style="background:#FFFFF0; border:1px dashed #FEA405; padding:10px; border-radius:8px; font-size:11px; color:#555; margin-bottom:15px; text-align:center;">
-                            Estimasi kebutuhan dan saran Purchase Order (PO) berdasarkan pemakaian aktual 15 hari ke belakang.
-                        </div>
-                        <div id="list-po-container"></div>
-                    `;
-                    parentArea.appendChild(poView);
-                    container = document.getElementById('list-po-container');
-                } else {
-                    return; // Gagal total jika parent tidak ada
-                }
-            }
+            container.innerHTML = "";
+            loader.classList.remove('hidden');
 
-            if (!window.globalDataPO || window.globalDataPO.length === 0) {
-                container.innerHTML = "<div style='text-align:center; padding:20px; font-size:12px; color:#888;'>Tidak ada data histori PO atau belum disinkronisasi.</div>";
-                return;
-            }
-
-            let gdg = document.querySelector('input[name="stok_gudang"]:checked').value;
-            let nf = new Intl.NumberFormat('id-ID');
-            let html = "";
-
-            // Grouping berdasar Gudang
-            let groupedPO = {};
-            window.globalDataPO.forEach(d => {
-                if (gdg !== "ALL" && d.cabang !== gdg) return;
-                if (!groupedPO[d.cabang]) groupedPO[d.cabang] = [];
-                groupedPO[d.cabang].push(d);
-            });
-
-            for (let cbg in groupedPO) {
-                html += `<h3 style="color:#1a5c40; font-size:14px; margin-top:20px; margin-bottom:10px; border-bottom:2px solid #8AA624; padding-bottom:5px;">${cbg === 'ALL' ? 'DATA GUDANG GLOBAL' : 'GUDANG ' + cbg}</h3>`;
+            // 🚀 TEMBAK KE RPC SUPABASE YANG BARU KITA BUAT
+            fetch(`${SUPA_URL}/rest/v1/rpc/get_estimasi_po`, {
+                method: 'POST',
+                headers: { 
+                    'apikey': SUPA_ANON_KEY, 
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ tgl_awal: start, tgl_akhir: end })
+            })
+            .then(r => r.json())
+            .then(data => {
+                loader.classList.add('hidden');
                 
-                // Sortir agar yang Saran PO-nya besar (kritis) ada di urutan paling atas!
-                groupedPO[cbg].sort((a,b) => b.saran_po_kg - a.saran_po_kg);
+                if (data.error) throw new Error(data.message);
+                if (!Array.isArray(data) || data.length === 0) {
+                    container.innerHTML = "<div style='text-align:center; padding:20px; font-size:12px; color:#888;'>Tidak ada aktivitas di periode ini.</div>";
+                    return;
+                }
 
-                groupedPO[cbg].forEach(p => {
-                    // Skip jika pakan mati (tidak ada stok & tidak ada pergerakan 15 hari)
-                    if (p.saran_po_kg <= 0 && p.stok_terkini <= 0 && p.total_kebutuhan_15_hari === 0) return;
+                let gdg = document.querySelector('input[name="stok_gudang"]:checked').value;
+                let nf = new Intl.NumberFormat('id-ID');
+                let html = "";
 
-                    let isKritis = p.saran_po_kg > 0;
-                    let borderColor = isKritis ? "#e65100" : "#8AA624";
-                    let bgBadge = isKritis ? "background:#ffebee; color:#c62828;" : "background:#e8f0d8; color:#2e7d32;";
-                    let statusTeks = isKritis ? "PERLU ORDER" : "STOK AMAN";
-
-                    html += `
-                    <div class="rekap-card" style="border-left: 4px solid ${borderColor}; padding:12px; margin-bottom:12px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #eee; padding-bottom:8px; margin-bottom:8px;">
-                            <strong style="font-size:14px; color:#333;">${p.pakan}</strong>
-                            <span style="${bgBadge} padding:4px 8px; border-radius:4px; font-size:10px; font-weight:bold;">${statusTeks}</span>
-                        </div>
-                        
-                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:11px; margin-bottom:10px;">
-                            <div>
-                                <div style="color:#888;">Pemakaian 15 Hari Terakhir:</div>
-                                <div style="font-size:13px; font-weight:bold; color:#555;">${nf.format(p.total_kebutuhan_15_hari)} Kg</div>
-                            </div>
-                            <div>
-                                <div style="color:#888;">Sisa Stok Terkini:</div>
-                                <div style="font-size:13px; font-weight:bold; color:#555;">${nf.format(p.stok_terkini)} Kg</div>
-                            </div>
-                        </div>
-
-                        <div style="background:#fafafa; border:1px solid #eee; padding:8px; border-radius:6px; font-size:10px; color:#666; margin-bottom:10px; line-height: 1.4;">
-                            <b>Rincian Distribusi 15 Hari:</b><br>
-                            Penjualan: <b>${nf.format(p.est_penjualan)} Kg</b> &nbsp;|&nbsp; Mutasi: <b>${nf.format(p.est_mutasi)} Kg</b><br>
-                            Gilingan: <b>${nf.format(p.est_giling)} Kg</b> &nbsp;|&nbsp; Kandang: <b>${nf.format(p.est_pemakaian)} Kg</b>
-                        </div>
-
-                        <div style="display:flex; justify-content:space-between; align-items:center; background:#f5f5f5; padding:8px; border-radius:6px;">
-                            <div style="font-size:10px; color:#888;">
-                                Batas Aman: <b>${nf.format(p.batas_aman_minimal)} Kg</b><br>
-                                Estimasi Ketahanan: <b><span style="color:${p.sisa_hari_aman <= 3 ? '#c62828' : '#888'};">${p.sisa_hari_aman === 999 ? '> 30' : p.sisa_hari_aman} Hari</span></b>
-                            </div>
-                            <div style="text-align:right;">
-                                <div style="font-size:10px; font-weight:bold; color:${borderColor};">SARAN ORDER (PO):</div>
-                                <div style="font-size:16px; font-weight:bold; color:${borderColor};">${nf.format(p.saran_po_kg)} Kg</div>
-                            </div>
-                        </div>
-                    </div>`;
+                // Grouping berdasar Gudang
+                let groupedPO = {};
+                data.forEach(d => {
+                    if (gdg !== "ALL" && d.cabang !== gdg) return;
+                    if (!groupedPO[d.cabang]) groupedPO[d.cabang] = [];
+                    groupedPO[d.cabang].push(d);
                 });
-            }
 
-            container.innerHTML = html || "<div style='text-align:center; color:#888; font-size:12px; padding:20px;'>Semua pakan dalam keadaan aman, tidak ada saran PO.</div>";
+                for (let cbg in groupedPO) {
+                    html += `<h3 style="color:#1a5c40; font-size:14px; margin-top:15px; margin-bottom:10px; border-bottom:2px solid #8AA624; padding-bottom:5px;">${cbg === 'ALL' ? 'DATA GUDANG GLOBAL' : 'GUDANG ' + cbg}</h3>`;
+                    
+                    // Sortir: Yang Paling Kritis (Saran PO Tertinggi) di atas!
+                    groupedPO[cbg].sort((a,b) => b.saran_po_kg - a.saran_po_kg);
+
+                    groupedPO[cbg].forEach(p => {
+                        // Abaikan pakan yang stoknya 0 dan tidak ada riwayat sama sekali di rentang tgl tsb
+                        if (p.saran_po_kg <= 0 && p.stok_terkini <= 0 && p.total_kebutuhan_periode === 0) return;
+
+                        let isKritis = p.saran_po_kg > 0;
+                        let borderColor = isKritis ? "#e65100" : "#8AA624";
+                        let bgBadge = isKritis ? "background:#ffebee; color:#c62828;" : "background:#e8f0d8; color:#2e7d32;";
+                        let statusTeks = isKritis ? "PERLU ORDER" : "STOK AMAN";
+
+                        html += `
+                        <div class="rekap-card" style="border-left: 4px solid ${borderColor}; padding:12px; margin-bottom:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #eee; padding-bottom:8px; margin-bottom:8px;">
+                                <strong style="font-size:14px; color:#333;">${p.pakan}</strong>
+                                <span style="${bgBadge} padding:4px 8px; border-radius:4px; font-size:10px; font-weight:bold;">${statusTeks}</span>
+                            </div>
+                            
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:11px; margin-bottom:10px;">
+                                <div>
+                                    <div style="color:#888;">Pemakaian Periode Ini:</div>
+                                    <div style="font-size:13px; font-weight:bold; color:#555;">${nf.format(p.total_kebutuhan_periode)} Kg</div>
+                                </div>
+                                <div>
+                                    <div style="color:#888;">Sisa Stok Terkini:</div>
+                                    <div style="font-size:13px; font-weight:bold; color:#555;">${nf.format(p.stok_terkini)} Kg</div>
+                                </div>
+                            </div>
+
+                            <div style="background:#fafafa; border:1px solid #eee; padding:8px; border-radius:6px; font-size:10px; color:#666; margin-bottom:10px; line-height: 1.4;">
+                                <b>Rincian Distribusi Keluar:</b><br>
+                                Penjualan: <b>${nf.format(p.est_penjualan)} Kg</b> &nbsp;|&nbsp; Mutasi: <b>${nf.format(p.est_mutasi)} Kg</b><br>
+                                Gilingan: <b>${nf.format(p.est_giling)} Kg</b> &nbsp;|&nbsp; Kandang: <b>${nf.format(p.est_pemakaian)} Kg</b>
+                            </div>
+
+                            <div style="display:flex; justify-content:space-between; align-items:center; background:#f5f5f5; padding:8px; border-radius:6px;">
+                                <div style="font-size:10px; color:#888;">
+                                    Batas Aman Gudang: <b>${nf.format(p.batas_aman_minimal)} Kg</b><br>
+                                    Estimasi Ketahanan: <b><span style="color:${p.sisa_hari_aman <= 3 ? '#c62828' : '#888'};">${p.sisa_hari_aman === 999 ? '> 30' : p.sisa_hari_aman} Hari Lagi</span></b>
+                                </div>
+                                <div style="text-align:right;">
+                                    <div style="font-size:10px; font-weight:bold; color:${borderColor};">SARAN ORDER (PO):</div>
+                                    <div style="font-size:16px; font-weight:bold; color:${borderColor};">${nf.format(p.saran_po_kg)} Kg</div>
+                                </div>
+                            </div>
+                        </div>`;
+                    });
+                }
+
+                container.innerHTML = html || "<div style='text-align:center; color:#888; font-size:12px; padding:20px;'>Semua pakan aman, tidak ada saran PO untuk gudang ini.</div>";
+
+            }).catch(e => {
+                loader.classList.add('hidden');
+                alert("Error menarik estimasi PO: " + e.message);
+            });
         }
 
         function tampilkanSaranPakan(inputElement) {
