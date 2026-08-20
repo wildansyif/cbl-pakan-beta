@@ -4696,7 +4696,9 @@ async function prosesAntreanBackground() {
 
             if (raw.master && raw.master.length > 0) {
                 raw.master.forEach(row => {
-                    let isPenjualan = (row.kat.includes('penjualan') || row.kat === '');
+                    // FIX: Paksa kategori jadi huruf kecil semua biar kebal terhadap error kapitalisasi!
+                    let katLower = String(row.kat || "").toLowerCase();
+                    let isPenjualan = (katLower.includes('penjualan') || katLower === '');
                     let p = row.pakan ? row.pakan.trim() : "Pakan";
 
                     if (row.status === 'keluar' && isPenjualan) {
@@ -4712,11 +4714,11 @@ async function prosesAntreanBackground() {
                     }
 
                     if (!isFiltered || row.bln === fM) {
-                        if (row.kat.includes("penjualan")) gudangQty[row.gudang].jual += row.qty;
-                        else if (row.kat.includes("pemakaian")) gudangQty[row.gudang].pakai += row.qty;
-                        else if (row.kat.includes("giling")) gudangQty[row.gudang].giling += row.qty;
-                        else if (row.kat.includes("mutasi")) gudangQty[row.gudang].mutasi += row.qty;
-                        else if (row.kat.includes("masuk") || row.status === 'masuk') gudangQty[row.gudang].masuk += row.qty;
+                        if (katLower.includes("penjualan")) gudangQty[row.gudang].jual += row.qty;
+                        else if (katLower.includes("pemakaian")) gudangQty[row.gudang].pakai += row.qty;
+                        else if (katLower.includes("giling")) gudangQty[row.gudang].giling += row.qty;
+                        else if (katLower.includes("mutasi")) gudangQty[row.gudang].mutasi += row.qty;
+                        else if (katLower.includes("masuk") || row.status === 'masuk') gudangQty[row.gudang].masuk += row.qty;
 
                         if (row.status === 'keluar' && isPenjualan) {
                             tOmzet += row.omzet; tHPP += row.hpp; tQty += row.qty;
