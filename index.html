@@ -3695,7 +3695,19 @@ async function prosesAntreanBackground() {
             let urlSJ = "-";
             if (pl.fileSJ && pl.fileSJ.base64) {
                 badge.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:16px; vertical-align:middle;">sync</span> Upload Surat Jalan...`;
-                let namaFile = `SJ_${cabangStr}_${Date.now()}_${Math.floor(Math.random()*100)}.jpg`;
+                let dSJ = pl.tanggal ? new Date(pl.tanggal) : new Date();
+                let tglSJ = ("0" + dSJ.getDate()).slice(-2) + "-" + ("0" + (dSJ.getMonth() + 1)).slice(-2) + "-" + dSJ.getFullYear();
+                
+                // Susun string pakan & qty (contoh: Mako S-20-200-Silase Jagung-100)
+                let arrPakan = [];
+                for (let namaPkn in pl.items) {
+                    arrPakan.push(`${namaPkn}-${pl.items[namaPkn]}`);
+                }
+                let strPakan = arrPakan.join('-');
+                
+                let rawNamaSJ = `SJ ${cabangStr}-${tglSJ}-${strPakan}`;
+                // Bersihkan karakter ilegal (seperti koma/titik/slash) agar aman di Supabase
+                let namaFile = rawNamaSJ.replace(/[^a-zA-Z0-9 \-]/g, '_') + '.jpg';
                 try {
                     urlSJ = await uploadGambarKeSupabase(pl.fileSJ.base64, pl.fileSJ.mime, 'surat_jalan', namaFile);
                 } catch (err) {
@@ -6257,7 +6269,12 @@ async function prosesAntreanBackground() {
         if (fileBase64_Global) {
             status.innerText = "Mengupload foto bukti...";
             status.style.color = "#FEA405";
-            let namaFile = `CF_${Date.now()}.jpg`; // Bikin nama file unik
+            let dCF = tgl ? new Date(tgl) : new Date();
+            let tglCF = ("0" + dCF.getDate()).slice(-2) + "-" + ("0" + (dCF.getMonth() + 1)).slice(-2) + "-" + dCF.getFullYear();
+            
+            let rawNamaCF = `${tglCF}-${relasi}-${nominal}`;
+            // Bersihkan karakter ilegal (seperti spasi ekstra, titik di nama PT, dll) agar aman
+            let namaFile = rawNamaCF.replace(/[^a-zA-Z0-9 \-]/g, '_') + '.jpg';
             buktiUrl = await uploadGambarKeSupabase(fileBase64_Global, fileMime_Global, 'cashflow', namaFile);
         }
 
