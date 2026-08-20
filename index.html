@@ -9050,30 +9050,61 @@ async function uploadGambarKeSupabase(base64Data, mimeType, folderName, fileName
 
             let html = '';
             let nf = new Intl.NumberFormat('id-ID');
+            
+            // 1. Grouping Data berdasarkan Relasi, Status, dan Jam Input
+            let grouped = {};
             globalTransaksiHariIni.forEach(t => {
-                let isKoreksi = t.catatan && t.catatan.includes('[DIKOREKSI');
-                let bgCard = isKoreksi ? '#fff8e1' : '#fff';
-                let bdCard = isKoreksi ? '#FEA405' : '#DBE4C9';
-                let stStyle = t.status === 'Masuk' ? 'color:#2e7d32; background:#e8f5e9;' : 'color:#c62828; background:#ffebee;';
                 let wkt = new Date(t.waktu_input || t.tanggal).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+                let key = `${t.relasi}_${t.status}_${wkt}`;
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        relasi: t.relasi,
+                        status: t.status,
+                        waktu: wkt,
+                        items: []
+                    };
+                }
+                grouped[key].items.push(t);
+            });
+
+            // 2. Render UI Kartu per Group
+            for (let key in grouped) {
+                let g = grouped[key];
+                let stStyle = g.status === 'Masuk' ? 'color:#2e7d32; background:#e8f5e9;' : 'color:#c62828; background:#ffebee;';
+                
+                let itemHtml = g.items.map(it => {
+                    let isKoreksi = it.catatan && it.catatan.includes('[DIKOREKSI');
+                    let bgItem = isKoreksi ? 'background:#fff8e1;' : '';
+                    let infoKoreksi = isKoreksi ? `<div style="font-size:9px; color:#e65100; font-style:italic; margin-top:2px;">Catatan: ${it.catatan}</div>` : (it.catatan ? `<div style="font-size:9px; color:#888; margin-top:2px;">Catatan: ${it.catatan}</div>` : '');
+                    
+                    return `
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding:8px 5px; ${bgItem}">
+                        <div style="flex:1;">
+                            <div style="font-size:12px; color:#555;">${it.pakan}</div>
+                            ${infoKoreksi}
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <strong style="color:#8AA624; font-size:12px;">${nf.format(it.qty)} ${it.satuan || 'Kg'}</strong>
+                            <button onclick="bukaModalEditTrx(${it.id})" style="background:#fff; border:1px solid #8AA624; color:#1a5c40; border-radius:4px; padding:4px 8px; font-size:10px; font-weight:bold; cursor:pointer;">
+                                <span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">edit</span> Edit
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('');
 
                 html += `
-                <div style="background:${bgCard}; border:1px solid ${bdCard}; border-radius:8px; padding:10px; margin-bottom:10px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:5px; border-bottom:1px dashed #ccc; padding-bottom:5px;">
+                <div style="background:#fff; border:1px solid #DBE4C9; border-radius:8px; padding:10px; margin-bottom:15px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; border-bottom:2px solid #f4f7f0; padding-bottom:8px;">
                         <div>
-                            <span style="font-size:10px; font-weight:bold; padding:2px 6px; border-radius:4px; ${stStyle}">${t.status}</span>
-                            <span style="font-size:10px; color:#888; margin-left:5px;">🕒 ${wkt}</span>
+                            <span style="font-size:10px; font-weight:bold; padding:2px 6px; border-radius:4px; ${stStyle}">${g.status}</span>
+                            <strong style="font-size:14px; color:#333; margin-left:5px;">${g.relasi}</strong>
                         </div>
-                        <button onclick="bukaModalEditTrx(${t.id})" style="background:none; border:none; color:#1a5c40; font-weight:bold; cursor:pointer; font-size:11px; display:flex; align-items:center; gap:2px;"><span class="material-symbols-outlined" style="font-size:14px;">edit</span> Edit</button>
+                        <div style="font-size:11px; color:#888; font-weight:bold;">${g.waktu}</div>
                     </div>
-                    <div style="font-size:13px; font-weight:bold; color:#333; margin-bottom:2px;">${t.relasi}</div>
-                    <div style="display:flex; justify-content:space-between; font-size:12px;">
-                        <span style="color:#555;">${t.pakan}</span>
-                        <strong style="color:#8AA624;">${nf.format(t.qty)} ${t.satuan || 'Kg'}</strong>
-                    </div>
-                    ${t.catatan ? `<div style="margin-top:5px; font-size:9px; color:#666; font-style:italic;">Catatan: ${t.catatan}</div>` : ''}
+                    <div>${itemHtml}</div>
                 </div>`;
-            });
+            }
+
             container.innerHTML = html;
         }
 
@@ -9177,15 +9208,22 @@ async function uploadGambarKeSupabase(base64Data, mimeType, folderName, fileName
             if (dMasuk.length > 0) {
                 txt += `🟢 *BARANG MASUK*\n`;
                 let grp = {};
-                dMasuk.forEach(x => { if (!grp[x.relasi]) grp[x.relasi] = []; grp[x.relasi].push(x); });
-                for (let r in grp) {
-                    txt += `\nDari: *${r}*\n`;
+                dMasuk.forEach(x => { 
+                    let wkt = new Date(x.waktu_input || x.tanggal).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+                    let key = `${x.relasi}_${wkt}`;
+                    if (!grp[key]) grp[key] = { relasi: x.relasi, waktu: wkt, items: [] }; 
+                    grp[key].items.push(x); 
+                });
+                for (let key in grp) {
+                    let rData = grp[key];
+                    txt += `\nDari: *${rData.relasi}* | Pukul: ${rData.waktu}\n`;
                     let subt = 0;
-                    grp[r].forEach(i => {
+                    rData.items.forEach(i => {
                         let ketKoreksi = i.catatan && i.catatan.includes('[DIKOREKSI') ? ' (Ada Koreksi)' : '';
-                        txt += `- ${i.pakan}: ${nf.format(i.qty)} Kg${ketKoreksi}\n`; subt += i.qty;
+                        txt += `• ${i.pakan}: ${nf.format(i.qty)} ${i.satuan || 'Kg'}${ketKoreksi}\n`; 
+                        subt += i.qty;
                     });
-                    txt += `_Total Masuk: ${nf.format(subt)} Kg_\n`;
+                    txt += `_Total Masuk: ${nf.format(subt)}_\n`;
                 }
                 txt += `\n`;
             }
@@ -9193,15 +9231,22 @@ async function uploadGambarKeSupabase(base64Data, mimeType, folderName, fileName
             if (dKeluar.length > 0) {
                 txt += `🔴 *BARANG KELUAR*\n`;
                 let grp = {};
-                dKeluar.forEach(x => { if (!grp[x.relasi]) grp[x.relasi] = []; grp[x.relasi].push(x); });
-                for (let r in grp) {
-                    txt += `\nKe: *${r}*\n`;
+                dKeluar.forEach(x => { 
+                    let wkt = new Date(x.waktu_input || x.tanggal).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+                    let key = `${x.relasi}_${wkt}`;
+                    if (!grp[key]) grp[key] = { relasi: x.relasi, waktu: wkt, items: [] }; 
+                    grp[key].items.push(x); 
+                });
+                for (let key in grp) {
+                    let rData = grp[key];
+                    txt += `\nKe: *${rData.relasi}* | Pukul: ${rData.waktu}\n`;
                     let subt = 0;
-                    grp[r].forEach(i => {
+                    rData.items.forEach(i => {
                         let ketKoreksi = i.catatan && i.catatan.includes('[DIKOREKSI') ? ' (Ada Koreksi)' : '';
-                        txt += `- ${i.pakan}: ${nf.format(i.qty)} Kg${ketKoreksi}\n`; subt += i.qty;
+                        txt += `• ${i.pakan}: ${nf.format(i.qty)} ${i.satuan || 'Kg'}${ketKoreksi}\n`; 
+                        subt += i.qty;
                     });
-                    txt += `_Total Keluar: ${nf.format(subt)} Kg_\n`;
+                    txt += `_Total Keluar: ${nf.format(subt)}_\n`;
                 }
             }
 
