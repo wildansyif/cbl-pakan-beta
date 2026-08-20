@@ -1648,6 +1648,62 @@
                     style="background:#e65100; margin-top:10px; grid-column: 1 / -1;">
                     <span class="material-symbols-outlined">warning</span> Menu Koreksi & Reject
                 </button>
+                <hr style="border: 0; border-top: 2px solid #DBE4C9; margin: 15px 0; grid-column: 1 / -1;">
+                <button class="btn-submit" id="btn-tutup-shift" onclick="bukaReviewHarian()"
+                    style="background:#1a5c40; margin-top:0; grid-column: 1 / -1;">
+                    <span class="material-symbols-outlined">fact_check</span> Review & Tutup Shift Hari Ini
+                </button>
+            </div>
+
+            <!-- LAYAR MODAL 1: DAFTAR REVIEW HARIAN -->
+            <div id="modal-review-harian" class="hidden" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; display:flex; justify-content:center; align-items:center; padding:15px; box-sizing:border-box;">
+                <div style="background:#fff; border-radius:12px; width:100%; max-width:500px; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+                    <div style="background:#1a5c40; padding:15px; color:white; display:flex; justify-content:space-between; align-items:center; border-radius:12px 12px 0 0;">
+                        <div><h3 style="margin:0; font-size:16px;">Tutup Shift Hari Ini</h3><div id="review-subtitle" style="font-size:11px; opacity:0.9;"></div></div>
+                        <span class="material-symbols-outlined" style="cursor:pointer;" onclick="document.getElementById('modal-review-harian').classList.add('hidden')">close</span>
+                    </div>
+                    <div id="review-loader" class="loader">Menarik data hari ini...</div>
+                    <div id="review-list" style="flex:1; overflow-y:auto; padding:15px; background:#f4f7f0;"></div>
+                    <div style="padding:15px; border-top:1px solid #eee; background:#fff; border-radius:0 0 12px 12px;">
+                        <button class="btn-submit" onclick="generateWALaporanHarian()" style="margin:0; background:#2196F3; width:100%;"><span class="material-symbols-outlined">send_to_mobile</span> Cetak Rekap ke WA</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LAYAR MODAL 2: EDIT SMART KOREKSI -->
+            <div id="modal-edit-transaksi" class="hidden" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:10000; display:flex; justify-content:center; align-items:center; padding:20px; box-sizing:border-box;">
+                <div style="background:#fff; border-radius:12px; width:100%; max-width:350px; padding:20px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+                    <h3 style="margin:0 0 5px 0; color:#e65100; font-size:16px;"><span class="material-symbols-outlined" style="vertical-align:middle; font-size:18px;">edit_square</span> Koreksi Transaksi</h3>
+                    <div id="edit-trx-info" style="font-size:11px; color:#555; margin-bottom:15px; padding-bottom:10px; border-bottom:1px dashed #ccc;"></div>
+                    
+                    <input type="hidden" id="edit_trx_id">
+                    <input type="hidden" id="edit_trx_catatan_lama">
+
+                    <div style="display:flex; gap:10px; margin-bottom:10px;">
+                        <div style="flex:1;">
+                            <label style="font-size:10px; color:#888;">Qty Awal (Sistem):</label>
+                            <input type="text" id="edit_qty_lama" disabled style="width:100%; padding:10px; border:1px solid #eee; border-radius:6px; background:#f5f5f5; font-weight:bold; color:#888; text-align:center;">
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-size:10px; color:#1a5c40; font-weight:bold;">Qty Benar (Kg):</label>
+                            <input type="number" id="edit_qty_baru" oninput="hitungSelisihEdit()" style="width:100%; padding:10px; border:1px solid #8AA624; border-radius:6px; font-weight:bold; color:#333; text-align:center;" placeholder="0">
+                        </div>
+                    </div>
+                    
+                    <div style="text-align:center; margin-bottom:15px;">
+                        <span style="font-size:11px; color:#555; font-weight:bold;">Selisih: </span>
+                        <span id="edit_selisih_label" style="font-size:14px; font-weight:bold; color:#333;">0 Kg</span>
+                    </div>
+
+                    <label style="font-size:11px; font-weight:bold; color:#e65100;">Alasan Koreksi (Wajib):</label>
+                    <input type="text" id="edit_alasan" placeholder="Cth: Typo, harusnya 400 Kg" style="width:100%; padding:10px; margin-bottom:20px; border:1px solid #FEA405; border-radius:6px; font-size:12px; box-sizing:border-box;">
+
+                    <div style="display:flex; gap:10px;">
+                        <button onclick="document.getElementById('modal-edit-transaksi').classList.add('hidden')" style="flex:1; padding:10px; border-radius:6px; border:none; background:#eee; color:#555; font-weight:bold; cursor:pointer;">Batal</button>
+                        <button id="btn_simpan_edit_trx" onclick="simpanKoreksiTransaksi()" style="flex:1; padding:10px; border-radius:6px; border:none; background:#e65100; color:white; font-weight:bold; cursor:pointer;">Simpan</button>
+                    </div>
+                </div>
+            </div>
             </div>
 
             <div id="form-cashflow" class="hidden">
@@ -8948,4 +9004,215 @@ async function uploadGambarKeSupabase(base64Data, mimeType, folderName, fileName
         throw new Error("Gagal mengupload gambar ke server.");
     }
 }
+
+        // ==========================================
+        // FITUR TUTUP SHIFT & SMART EDIT KOREKSI
+        // ==========================================
+        let globalTransaksiHariIni = [];
+
+        function bukaReviewHarian() {
+            if (!navigator.onLine) return alert("Wajib online untuk mereview laporan Supabase!");
+            
+            let lokasiAktif = getLokasiAktif();
+            let mapLoc = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'Kandang PM', '/spn_kandang': 'Kandang SPN' };
+            let cabangStr = mapLoc[lokasiAktif] || 'PM';
+            
+            let dObj = new Date();
+            let tglForm = document.getElementById('tanggal').value;
+            if (tglForm) dObj = new Date(tglForm);
+            
+            let tglFilter = dObj.toISOString().split('T')[0];
+            let tglIndo = ("0" + dObj.getDate()).slice(-2) + "/" + ("0" + (dObj.getMonth() + 1)).slice(-2) + "/" + dObj.getFullYear();
+
+            document.getElementById('review-subtitle').innerText = `Gudang: ${cabangStr} | Tgl: ${tglIndo}`;
+            document.getElementById('modal-review-harian').classList.remove('hidden');
+            document.getElementById('review-loader').style.display = 'block';
+            document.getElementById('review-list').innerHTML = '';
+
+            fetch(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=eq.${tglFilter}&cabang=eq.${cabangStr}&order=waktu_input.asc`, {
+                headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('review-loader').style.display = 'none';
+                globalTransaksiHariIni = data;
+                renderListReviewHarian();
+            }).catch(e => {
+                document.getElementById('review-loader').innerText = "Gagal memuat data!";
+            });
+        }
+
+        function renderListReviewHarian() {
+            let container = document.getElementById('review-list');
+            if (globalTransaksiHariIni.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:#888; font-size:12px; padding:20px;">Belum ada transaksi hari ini di gudang ini.</div>';
+                return;
+            }
+
+            let html = '';
+            let nf = new Intl.NumberFormat('id-ID');
+            globalTransaksiHariIni.forEach(t => {
+                let isKoreksi = t.catatan && t.catatan.includes('[DIKOREKSI');
+                let bgCard = isKoreksi ? '#fff8e1' : '#fff';
+                let bdCard = isKoreksi ? '#FEA405' : '#DBE4C9';
+                let stStyle = t.status === 'Masuk' ? 'color:#2e7d32; background:#e8f5e9;' : 'color:#c62828; background:#ffebee;';
+                let wkt = new Date(t.waktu_input || t.tanggal).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+
+                html += `
+                <div style="background:${bgCard}; border:1px solid ${bdCard}; border-radius:8px; padding:10px; margin-bottom:10px; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:5px; border-bottom:1px dashed #ccc; padding-bottom:5px;">
+                        <div>
+                            <span style="font-size:10px; font-weight:bold; padding:2px 6px; border-radius:4px; ${stStyle}">${t.status}</span>
+                            <span style="font-size:10px; color:#888; margin-left:5px;">🕒 ${wkt}</span>
+                        </div>
+                        <button onclick="bukaModalEditTrx(${t.id})" style="background:none; border:none; color:#1a5c40; font-weight:bold; cursor:pointer; font-size:11px; display:flex; align-items:center; gap:2px;"><span class="material-symbols-outlined" style="font-size:14px;">edit</span> Edit</button>
+                    </div>
+                    <div style="font-size:13px; font-weight:bold; color:#333; margin-bottom:2px;">${t.relasi}</div>
+                    <div style="display:flex; justify-content:space-between; font-size:12px;">
+                        <span style="color:#555;">${t.pakan}</span>
+                        <strong style="color:#8AA624;">${nf.format(t.qty)} ${t.satuan || 'Kg'}</strong>
+                    </div>
+                    ${t.catatan ? `<div style="margin-top:5px; font-size:9px; color:#666; font-style:italic;">Catatan: ${t.catatan}</div>` : ''}
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function bukaModalEditTrx(id) {
+            let t = globalTransaksiHariIni.find(x => x.id === id);
+            if (!t) return;
+
+            document.getElementById('edit_trx_id').value = id;
+            document.getElementById('edit_trx_catatan_lama').value = t.catatan || '';
+            document.getElementById('edit-trx-info').innerHTML = `<b>${t.relasi}</b><br>${t.pakan} <span style="background:#eee; padding:2px 5px; border-radius:3px;">${t.status}</span>`;
+            
+            document.getElementById('edit_qty_lama').value = t.qty;
+            document.getElementById('edit_qty_baru').value = '';
+            document.getElementById('edit_alasan').value = '';
+            document.getElementById('edit_selisih_label').innerText = '0 Kg';
+            document.getElementById('edit_selisih_label').style.color = '#333';
+
+            document.getElementById('modal-edit-transaksi').classList.remove('hidden');
+        }
+
+        function hitungSelisihEdit() {
+            let lama = parseFloat(document.getElementById('edit_qty_lama').value) || 0;
+            let baru = parseFloat(document.getElementById('edit_qty_baru').value) || 0;
+            let selisih = baru - lama;
+            
+            let label = document.getElementById('edit_selisih_label');
+            let nf = new Intl.NumberFormat('id-ID');
+            
+            if (selisih > 0) {
+                label.innerText = `+${nf.format(selisih)} Kg`;
+                label.style.color = '#8AA624';
+            } else if (selisih < 0) {
+                label.innerText = `${nf.format(selisih)} Kg`;
+                label.style.color = '#c62828';
+            } else {
+                label.innerText = `0 Kg`;
+                label.style.color = '#333';
+            }
+        }
+
+        function simpanKoreksiTransaksi() {
+            let id = document.getElementById('edit_trx_id').value;
+            let lama = parseFloat(document.getElementById('edit_qty_lama').value) || 0;
+            let baru = parseFloat(document.getElementById('edit_qty_baru').value);
+            let alasan = document.getElementById('edit_alasan').value.trim();
+            let catLama = document.getElementById('edit_trx_catatan_lama').value;
+
+            if (isNaN(baru) || baru < 0) return alert("Qty baru tidak valid!");
+            if (baru === lama) return alert("Angka belum diubah!");
+            if (!alasan) return alert("Alasan koreksi WAJIB diisi!");
+
+            let btn = document.getElementById('btn_simpan_edit_trx');
+            btn.innerHTML = "Menyimpan..."; btn.disabled = true;
+
+            // Rangkai catatan jejak audit
+            let tambahanCatatan = ` [DIKOREKSI: ${lama}Kg -> ${baru}Kg. Alasan: ${alasan}]`;
+            let catatanFinal = catLama.replace(/ \[DIKOREKSI:.*?\]/g, '') + tambahanCatatan;
+
+            fetch(`${SUPA_URL}/rest/v1/transaksi_pakan?id=eq.${id}`, {
+                method: 'PATCH',
+                headers: { 
+                    'apikey': SUPA_ANON_KEY, 
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify({ qty: baru, catatan: catatanFinal, waktu_input: new Date().toISOString() })
+            })
+            .then(res => {
+                if (res.ok) {
+                    let tIndex = globalTransaksiHariIni.findIndex(x => x.id == id);
+                    if (tIndex !== -1) {
+                        globalTransaksiHariIni[tIndex].qty = baru;
+                        globalTransaksiHariIni[tIndex].catatan = catatanFinal;
+                    }
+                    renderListReviewHarian();
+                    document.getElementById('modal-edit-transaksi').classList.add('hidden');
+                    alert("✅ Koreksi berhasil disimpan ke database!");
+                } else { alert("Gagal menyimpan koreksi!"); }
+            }).catch(e => { alert("Error jaringan: " + e.message); })
+            .finally(() => { btn.innerHTML = "Simpan"; btn.disabled = false; });
+        }
+
+        function generateWALaporanHarian() {
+            if (globalTransaksiHariIni.length === 0) return alert("Tidak ada data untuk direkap!");
+
+            let mapLoc = { '/pm': 'PM', '/spn': 'SPN', '/rph': 'RPH', '/kandang': 'Kandang PM', '/spn_kandang': 'Kandang SPN' };
+            let cabangStr = mapLoc[getLokasiAktif()] || 'PM';
+
+            let dObj = new Date();
+            let tglForm = document.getElementById('tanggal').value;
+            if (tglForm) dObj = new Date(tglForm);
+            let tglIndo = ("0" + dObj.getDate()).slice(-2) + "/" + ("0" + (dObj.getMonth() + 1)).slice(-2) + "/" + dObj.getFullYear();
+
+            let txt = `*TUTUP SHIFT GUDANG ${cabangStr}*\nTanggal: ${tglIndo}\nPetugas: ${activeUser}\n\n`;
+
+            let dMasuk = globalTransaksiHariIni.filter(x => x.status === 'Masuk');
+            let dKeluar = globalTransaksiHariIni.filter(x => x.status === 'Keluar');
+            let nf = new Intl.NumberFormat('id-ID');
+
+            if (dMasuk.length > 0) {
+                txt += `🟢 *BARANG MASUK*\n`;
+                let grp = {};
+                dMasuk.forEach(x => { if (!grp[x.relasi]) grp[x.relasi] = []; grp[x.relasi].push(x); });
+                for (let r in grp) {
+                    txt += `\nDari: *${r}*\n`;
+                    let subt = 0;
+                    grp[r].forEach(i => {
+                        let ketKoreksi = i.catatan && i.catatan.includes('[DIKOREKSI') ? ' (Ada Koreksi)' : '';
+                        txt += `- ${i.pakan}: ${nf.format(i.qty)} Kg${ketKoreksi}\n`; subt += i.qty;
+                    });
+                    txt += `_Total Masuk: ${nf.format(subt)} Kg_\n`;
+                }
+                txt += `\n`;
+            }
+
+            if (dKeluar.length > 0) {
+                txt += `🔴 *BARANG KELUAR*\n`;
+                let grp = {};
+                dKeluar.forEach(x => { if (!grp[x.relasi]) grp[x.relasi] = []; grp[x.relasi].push(x); });
+                for (let r in grp) {
+                    txt += `\nKe: *${r}*\n`;
+                    let subt = 0;
+                    grp[r].forEach(i => {
+                        let ketKoreksi = i.catatan && i.catatan.includes('[DIKOREKSI') ? ' (Ada Koreksi)' : '';
+                        txt += `- ${i.pakan}: ${nf.format(i.qty)} Kg${ketKoreksi}\n`; subt += i.qty;
+                    });
+                    txt += `_Total Keluar: ${nf.format(subt)} Kg_\n`;
+                }
+            }
+
+            if (currentLoggedPin === "1234") {
+                let tempInput = document.createElement("textarea"); tempInput.value = txt.trim();
+                document.body.appendChild(tempInput); tempInput.select(); document.execCommand("copy"); document.body.removeChild(tempInput);
+                alert("✅ Rekapan Laporan Hari Ini berhasil di-copy! Silakan paste ke WhatsApp.");
+            } else {
+                let waUrl = `https://wa.me/${NOMOR_WA_ADMIN}?text=${encodeURIComponent(txt.trim())}`;
+                window.open(waUrl, '_blank') || (window.location.href = waUrl);
+            }
+        }
     </script>
