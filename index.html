@@ -5856,24 +5856,28 @@ async function prosesAntreanBackground() {
                 })
                 .then(res => res.json())
                 .then(data => { 
-                    // FILTER: Hanya tampilkan pakan yang ALL atau sesuai cabang
+                    // FILTER: Sembunyikan pakan jika lokasi_aktif-nya diisi tulisan 'HIDDEN'
                     let pakanTersedia = data.filter(p => 
-                        !p.lokasi_aktif || 
+                        p.lokasi_aktif !== 'HIDDEN' &&
+                        (!p.lokasi_aktif || 
                         p.lokasi_aktif === 'ALL' || 
-                        p.lokasi_aktif.includes(cabangSaatIni)
+                        p.lokasi_aktif.includes(cabangSaatIni))
                     );
 
                     let formattedData = {
                         status: 'success',
                         data: pakanTersedia.map(p => ({
-                            nama: p.jenis_pakan, // Menggunakan kolom jenis_pakan
+                            id: p.id, // Ambil ID-nya dari Supabase
+                            nama: p.jenis_pakan, 
                             harga: p.harga_jual || 0,
                             satuan: p.satuan || 'Kg',
                             kemasan: p.kemasan || 0
                         }))
                     };
                     
-                    formattedData.data.sort((a, b) => a.nama.localeCompare(b.nama));
+                    // URUTKAN BERDASARKAN ID (Dari terkecil ke terbesar), bukan Abjad lagi!
+                    formattedData.data.sort((a, b) => a.id - b.id);
+
                     localStorage.setItem('pakan_data_' + lokasi, JSON.stringify(formattedData)); 
                     renderPakan(formattedData); 
                 })
