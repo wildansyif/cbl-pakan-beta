@@ -3732,6 +3732,7 @@ async function prosesAntreanBackground() {
                     cabang: cabangStr,
                     status: pl.status || 'Keluar',
                     relasi: pl.relasi || '-',
+                    alamat: pl.alamat || '-', // <--- TAMBAHKAN BARIS INI
                     pakan: pakanName,
                     qty: itemQty,
                     satuan: satuan,
@@ -3753,6 +3754,7 @@ async function prosesAntreanBackground() {
                     cabang: cabangStr,
                     status: pl.status || 'Keluar',
                     relasi: pl.relasi || '-',
+                    alamat: pl.alamat || '-', // <--- TAMBAHKAN BARIS INI JUGA
                     pakan: 'Ongkir Pengiriman',
                     qty: 1,
                     satuan: 'Rit',
@@ -5129,7 +5131,7 @@ async function prosesAntreanBackground() {
 
                     if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
                         // 🔥 TAMBAHAN: Laci 'detailPotongan' untuk menyimpan jejak uang dipakai bayar apa saja
-                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [] });
+                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [], bukti_url: row.bukti_url });
                     } else {
                         rawByRelasi[r].tagihan.push({
                             tgl: row.tanggal,
@@ -5277,10 +5279,12 @@ async function prosesAntreanBackground() {
                             ketText = `<i style="color:#888;">Belum digunakan untuk memotong nota manapun.</i>`;
                         }
 
+                        let linkBukti = (byr.bukti_url && byr.bukti_url.length > 5 && byr.bukti_url !== "-") ? `<a href="${byr.bukti_url}" target="_blank" style="margin-left:5px; color:#4A90E2; text-decoration:none;"><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">receipt_long</span> Bukti</a>` : "";
                         serverData[r].riwayat.push({
                             tgl: bTglStr,
                             nominal: byr.nominal,
-                            ket: ketText
+                            ket: ketText,
+                            link: linkBukti
                         });
                     });
                 }
@@ -5481,7 +5485,7 @@ async function prosesAntreanBackground() {
                         riwayatHtml += `<div style="background:#f8fdf4; border:1px solid #DBE4C9; border-radius:6px; padding:8px; margin-bottom:6px; cursor:pointer;" onclick="document.getElementById('det_rw_${safeClass}_${indexRiwayat}').classList.toggle('hidden')">
                           <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:4px;">
                               <div>
-                                  <span style="font-weight:bold; font-size:11px;">Tgl Bayar: ${rw.tgl}</span><br>
+                                  <span style="font-weight:bold; font-size:11px;">Tgl Bayar: ${rw.tgl} ${rw.link}</span><br>
                                   <span style="font-size:9px; color:#888; font-weight:normal;">Klik untuk lihat rincian ▾</span>
                               </div>
                               <span style="color:#8AA624; font-weight:bold; font-size:11px;">+ Rp ${nf.format(rw.nominal)}</span>
@@ -7340,7 +7344,7 @@ async function prosesAntreanBackground() {
                         htmlBayar += `
                           <div class="rank-item" style="border-left-color:#8AA624; display:block;">
                               <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px dashed #DBE4C9; padding-bottom:6px; margin-bottom:6px;">
-                                  <span style="font-weight:bold; color:#1a5c40;">Tgl Bayar: ${b.tgl}</span>
+                                  <span style="font-weight:bold; color:#1a5c40;">Tgl Bayar: ${b.tgl} ${b.link}</span>
                                   <strong style="color:#8AA624; font-size:13px;">+ Rp ${nf.format(b.nominal)}</strong>
                               </div>
                               <div style="font-size:11px; color:#555; line-height:1.5;">
@@ -7502,7 +7506,7 @@ async function prosesAntreanBackground() {
                     }
                     if (ketText === '') ketText = `<i style="color:#888;">Belum digunakan untuk memotong nota manapun.</i>`;
                     
-                    riwayatBayar.push({ tgl: bTglStr, nominal: byr.nominal, ket: ketText });
+                    let linkBukti = (byr.bukti_url && byr.bukti_url.length > 5 && byr.bukti_url !== "-") ? `<a href="${byr.bukti_url}" target="_blank" style="margin-left:5px; color:#4A90E2; text-decoration:none;"><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">receipt_long</span> Bukti</a>` : "";                     riwayatBayar.push({ tgl: bTglStr, nominal: byr.nominal, ket: ketText, link: linkBukti });
                 });
 
                 let siklusStr = hitunganSiklus > 0 ? `Rata-rata ${Math.round(totalHariSiklus / hitunganSiklus)} hari sekali` : "Belum ada pola";
