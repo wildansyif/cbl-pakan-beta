@@ -3346,9 +3346,13 @@
                     return;
                 }
 
-                filteredData.sort((a,b) => b.saran_po_kg - a.saran_po_kg);
+                // 1. SORTING: Kelompokkan Gudang dulu, baru urutkan Saran Order terbesar
+                filteredData.sort((a, b) => {
+                    if (a.cabang !== b.cabang) return a.cabang.localeCompare(b.cabang);
+                    return b.saran_po_kg - a.saran_po_kg;
+                });
 
-                // 🔥 RENDER TABEL HEADER (Tegas, Kontras, Profesional)
+                // 2. RENDER TABEL HEADER DENGAN KOLOM STOK BUFFER BARU
                 let html = `
                 <div style="overflow-x:auto; margin-top:10px; box-shadow:0 4px 6px rgba(0,0,0,0.1);">
                     <table style="width:100%; font-size:12px; border-collapse:collapse; white-space:nowrap; border: 1px solid #999;">
@@ -3362,6 +3366,7 @@
                                 <th style="padding:12px 8px; border:1px solid #999;">Mutasi</th>
                                 <th style="padding:12px 8px; border:1px solid #999;">Total Keb.</th>
                                 <th style="padding:12px 8px; border:1px solid #999;">Sisa Stok</th>
+                                <th style="padding:12px 8px; border:1px solid #999; background:#FEA405; color:#fff;">Stok Buffer</th>
                                 <th style="padding:12px 8px; border:1px solid #999;">Est. Ketahanan</th>
                                 <th style="padding:12px 8px; border:1px solid #999;">Saran Order</th>
                             </tr>
@@ -3369,6 +3374,7 @@
                         <tbody>`;
 
                 let adaDataValid = false;
+                let currentGudang = ""; // Tracker untuk pemisah Gudang
 
                 filteredData.forEach(p => {
                     // Abaikan jika tidak butuh PO dan tidak ada pergerakan
@@ -3381,17 +3387,38 @@
                     // Highlight merah hanya untuk teks ketahanan yang menipis
                     let warnHari = (p.sisa_hari_aman <= 3 && isKritis) ? "color:#c62828; font-weight:bold;" : "color:#000;";
 
-                    html += `<tr style="background:#fff; color:#000; border-bottom:1px solid #999;">
-                        <td style="padding:10px 8px; border:1px solid #999; text-align:center;">${p.cabang}</td>
+                    // Tarik standar Buffer Stok dari memori radar
+                    let bufferStok = window.minStokDict ? (window.minStokDict[p.pakan] || 500) : 500;
+
+                    // LOGIKA PEMISAH (SPACER) ANTAR GUDANG
+                    let trStyle = "background:#fff; color:#000; border-bottom:1px solid #999;";
+                    let tdGudangStyle = "padding:10px 8px; border:1px solid #999; text-align:center; font-weight:bold; color:#1a5c40;";
+                    
+                    if (currentGudang !== "" && currentGudang !== p.cabang) {
+                        // Tambahkan baris kosong estetik sebagai spasi (colspan 11 karena ada kolom baru)
+                        html += `<tr style="background:#f4f7f0; border:none; height:15px;"><td colspan="11" style="border:none;"></td></tr>`;
+                        // Beri border atas tebal untuk gudang baru
+                        trStyle += " border-top: 3px solid #1a5c40;";
+                        tdGudangStyle += " background:#e8f0d8;"; // Warnai sel Gudang pertama
+                    } else if (currentGudang === "") {
+                        trStyle += " border-top: 3px solid #1a5c40;";
+                        tdGudangStyle += " background:#e8f0d8;";
+                    }
+
+                    currentGudang = p.cabang;
+
+                    html += `<tr style="${trStyle}">
+                        <td style="${tdGudangStyle}">${p.cabang}</td>
                         <td style="padding:10px 8px; border:1px solid #999; text-align:left; font-weight:bold;">${p.pakan}</td>
                         <td style="padding:10px 8px; border:1px solid #999; text-align:right;">${nf.format(p.est_penjualan)}</td>
                         <td style="padding:10px 8px; border:1px solid #999; text-align:right;">${nf.format(p.est_pemakaian)}</td>
                         <td style="padding:10px 8px; border:1px solid #999; text-align:right;">${nf.format(p.est_giling)}</td>
                         <td style="padding:10px 8px; border:1px solid #999; text-align:right;">${nf.format(p.est_mutasi)}</td>
-                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold;">${nf.format(p.total_kebutuhan_periode)}</td>
-                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold;">${nf.format(p.stok_terkini)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold; color:#c62828;">${nf.format(p.total_kebutuhan_periode)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold; color:#15803d;">${nf.format(p.stok_terkini)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold; color:#FEA405;">${nf.format(bufferStok)}</td>
                         <td style="padding:10px 8px; border:1px solid #999; text-align:center; ${warnHari}">${ketahananText}</td>
-                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold; color:#000;">${nf.format(p.saran_po_kg)}</td>
+                        <td style="padding:10px 8px; border:1px solid #999; text-align:right; font-weight:bold; font-size:14px; background:#e8f0d8; color:#1a5c40;">${nf.format(p.saran_po_kg)}</td>
                     </tr>`;
                 });
 
