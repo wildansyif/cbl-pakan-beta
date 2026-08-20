@@ -3852,21 +3852,23 @@ async function prosesAntreanBackground() {
         }
 
         // 🚀 TEMBAK KE TABEL PAKAN (Akses VIP via API Anon Key)
-        let resPakan = await fetch(`${SUPA_URL}/rest/v1/transaksi_pakan`, {
-            method: 'POST',
-            headers: {
-                'apikey': SUPA_ANON_KEY,
-                'Authorization': `Bearer ${SUPA_ANON_KEY}`,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=minimal'
-            },
-            body: JSON.stringify(supabaseRows),
-            signal: uploadAbortController.signal
-        });
+        if (supabaseRows.length > 0) {
+            let resPakan = await fetch(`${SUPA_URL}/rest/v1/transaksi_pakan`, {
+                method: 'POST',
+                headers: {
+                    'apikey': SUPA_ANON_KEY,
+                    'Authorization': `Bearer ${SUPA_ANON_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=minimal'
+                },
+                body: JSON.stringify(supabaseRows),
+                signal: uploadAbortController.signal
+            });
 
-        if (!resPakan.ok) {
-            const err = await resPakan.json();
-            throw new Error("Pakan Error: " + err.message);
+            if (!resPakan.ok) {
+                const err = await resPakan.json();
+                throw new Error("Pakan Error: " + err.message);
+            }
         }
 
         // 🚀 TEMBAK KE TABEL CASHFLOW (BONGKAR MUAT)
@@ -6438,7 +6440,11 @@ async function prosesAntreanBackground() {
                 }
             });
 
-            if (totalItem === 0) { alert("Pilih minimal satu pakan!"); return; }
+            let cekOngkir = parseFloat(String(payload.ongkir).replace(/[^0-9]/g, '')) || 0;
+            if (totalItem === 0 && cekOngkir === 0 && !payload.uangBongkar) { 
+                alert("⚠️ Pilih minimal satu pakan, atau isi nominal Ongkir!"); 
+                return; 
+            }
 
             let dObj = payload.tanggal ? new Date(payload.tanggal) : new Date();
             let tglFormatShort = ("0" + dObj.getDate()).slice(-2) + "/" + ("0" + (dObj.getMonth() + 1)).slice(-2) + "/" + dObj.getFullYear().toString().substring(2);
@@ -6601,7 +6607,8 @@ async function prosesAntreanBackground() {
             for (let pakan in payload.items) {
                 rincianItems.push(pakan + ":" + payload.items[pakan]);
             }
-            let stringItem = rincianItems.join("|");
+            // Gabungkan nilai ongkir ke dalam sistem penanda agar bisa diinput berkali-kali tanpa diblokir
+            let stringItem = rincianItems.join("|") + "_ONGKIR:" + (payload.ongkir || "");
 
             let hashStr = payload.relasi + "_" + stringItem + "_" + payload.status + "_" + payload.tanggal;
             let duplikat = historyInput.find(h => h.hash === hashStr);
@@ -9209,21 +9216,27 @@ async function uploadGambarKeSupabase(base64Data, mimeType, folderName, fileName
                 txt += `🟢 *BARANG MASUK*\n`;
                 let grp = {};
                 dMasuk.forEach(x => { 
-                    let wkt = new Date(x.waktu_input || x.tanggal).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
-                    let key = `${x.relasi}_${wkt}`;
-                    if (!grp[key]) grp[key] = { relasi: x.relasi, waktu: wkt, items: [] }; 
+                    // SULAPNYA DI SINI: Mesin hanya peduli nama Relasi, tidak peduli perbedaan jam
+                    let key = x.relasi; 
+                    if (!grp[key]) {
+                        // Ambil jam dari transaksi yang PERTAMA kali dilakukan hari itu
+                        let wkt = new Date(x.waktu_input || x.tanggal).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+                        grp[key] = { relasi: x.relasi, waktu: wkt, items: [] }; 
+                    }
                     grp[key].items.push(x); 
                 });
+                
                 for (let key in grp) {
                     let rData = grp[key];
                     txt += `\nDari: *${rData.relasi}* | Pukul: ${rData.waktu}\n`;
                     let subt = 0;
                     rData.items.forEach(i => {
                         let ketKoreksi = i.catatan && i.catatan.includes('[DIKOREKSI') ? ' (Ada Koreksi)' : '';
-                        txt += `• ${i.pakan}: ${nf.format(i.qty)} ${i.satuan || 'Kg'}${ketKoreksi}\n`; 
+                        let ketSusulan = i.catatan && i.catatan.toLowerCase().includes('susulan') ? ' (Susulan)' : '';
+                        txt += `• ${i.pakan}: ${nf.format(i.qty)} ${i.satuan || 'Kg'}${ketKoreksi}${ketSusulan}\n`; 
                         subt += i.qty;
                     });
-                    txt += `_Total Masuk: ${nf.format(subt)}_\n`;
+                    txt += `Total Masuk: ${nf.format(subt)} Kg\n`;
                 }
                 txt += `\n`;
             }
@@ -9232,21 +9245,26 @@ async function uploadGambarKeSupabase(base64Data, mimeType, folderName, fileName
                 txt += `🔴 *BARANG KELUAR*\n`;
                 let grp = {};
                 dKeluar.forEach(x => { 
-                    let wkt = new Date(x.waktu_input || x.tanggal).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
-                    let key = `${x.relasi}_${wkt}`;
-                    if (!grp[key]) grp[key] = { relasi: x.relasi, waktu: wkt, items: [] }; 
+                    // SULAPNYA DI SINI: Mesin menggabungkan item susulan ke nama yang sama
+                    let key = x.relasi; 
+                    if (!grp[key]) {
+                        let wkt = new Date(x.waktu_input || x.tanggal).toLocaleTimeString('id-ID', {hour: '2-digit', minute:'2-digit'});
+                        grp[key] = { relasi: x.relasi, waktu: wkt, items: [] }; 
+                    }
                     grp[key].items.push(x); 
                 });
+                
                 for (let key in grp) {
                     let rData = grp[key];
                     txt += `\nKe: *${rData.relasi}* | Pukul: ${rData.waktu}\n`;
                     let subt = 0;
                     rData.items.forEach(i => {
                         let ketKoreksi = i.catatan && i.catatan.includes('[DIKOREKSI') ? ' (Ada Koreksi)' : '';
-                        txt += `• ${i.pakan}: ${nf.format(i.qty)} ${i.satuan || 'Kg'}${ketKoreksi}\n`; 
+                        let ketSusulan = i.catatan && i.catatan.toLowerCase().includes('susulan') ? ' (Susulan)' : '';
+                        txt += `• ${i.pakan}: ${nf.format(i.qty)} ${i.satuan || 'Kg'}${ketKoreksi}${ketSusulan}\n`; 
                         subt += i.qty;
                     });
-                    txt += `_Total Keluar: ${nf.format(subt)}_\n`;
+                    txt += `Total Keluar: ${nf.format(subt)} Kg\n`;
                 }
             }
 
