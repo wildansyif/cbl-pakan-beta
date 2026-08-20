@@ -4761,7 +4761,9 @@ async function prosesAntreanBackground() {
 
             if (raw.kp && raw.kp.length > 0) {
                 raw.kp.forEach(k => {
-                    if (!isFiltered || k.bln === fM) { if (k.isTelat) tPiutangTelat += k.nominal; else tPiutangSehat += k.nominal; }
+                    // FIX: Piutang adalah akumulasi global (real-time), jadi abaikan filter bulan!
+                    if (k.isTelat) tPiutangTelat += k.nominal; 
+                    else tPiutangSehat += k.nominal; 
                 });
             }
 
