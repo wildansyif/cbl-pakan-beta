@@ -4551,89 +4551,240 @@ async function prosesAntreanBackground() {
                     throw new Error(masterData.message || cfData.message);
                 }
 
-                // 1. TERJEMAHKAN MASTER PAKAN KE FORMAT DASHBOARD PWA
-                let serverMaster = masterData.map(row => {
-                    let cKat = "Penjualan";
-                    let cGroup = "Keluar";
-                    let namaRelasi = String(row.relasi).toLowerCase();
-                    let catatanLengkap = String(row.catatan || "").toLowerCase();
+                // 🛠️ Menerjemahkan data Supabase & MENJALANKAN FIFO SMART SWEEP
+                let serverData = {};
+                let hariIni = new Date();
+                hariIni.setHours(0, 0, 0, 0);
 
-                    // Mesin Akuntan PWA (Otomatis Menggolongkan Transaksi)
-                    if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) {
-                        cKat = "Giling"; cGroup = "Keluar";
-                    } else if (String(row.status).toLowerCase().includes("masuk")) {
-                        cGroup = "Masuk";
-                        if (catatanLengkap.includes("gudang")) cKat = "Mutasi";
-                        else cKat = "Masuk";
-                    } else {
-                        if (String(row.cabang).toLowerCase().includes('kandang')) cKat = "Pemakaian";
-                        else if (namaRelasi.includes("kandang") || namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) cKat = "Mutasi";
-                        else cKat = "Penjualan";
+                let rawByRelasi = {};
+
+                data.forEach(row => {
+                    let r = String(row.relasi || "").trim();
+                    if (!r || r === "-") return;
+
+                    let rLower = r.toLowerCase();
+                    if (rLower.includes('rd') || rLower.includes('rl') || rLower.includes('pembibitan') || 
+                        rLower.includes('spn') || rLower.includes('rph') || rLower.includes('cibulakan') || 
+                        rLower.includes('kandang')) {
+                        return; 
+                    }
+                    
+                    if (!rawByRelasi[r]) {
+                        rawByRelasi[r] = { tagihan: [], bayar: [], alamat: row.alamat || '-' };
                     }
 
-                    return {
-                        tgl: row.tanggal,
-                        gudang: row.cabang,
-                        kat: cKat,
-                        catGroup: cGroup,
-                        status: row.status,
-                        relasi: row.relasi,
-                        pakan: row.pakan_kategori || row.pakan,
-                        qty: parseFloat(row.qty) || 0,
-                        isPending: false,
-                        timestamp: new Date(row.waktu_input || row.tanggal).getTime()
-                    };
+                    let nominal = parseFloat(row.nominal) || parseFloat(row.tagihan) || parseFloat(row.debet) || ((parseFloat(row.qty)||0) * (parseFloat(row.harga_satuan)||0)) || 0;
+
+                    if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
+                        // DIET: Buang bukti_url dari cache bayar, ambil tanggal & nominal saja
+                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [] });
+                    } else {
+                        // DIET: Hanya simpan info sangat esensial
+                        rawByRelasi[r].tagihan.push({
+                            tgl: row.tanggal,
+                            pakan: row.pakan_kategori || 'Pakan',
+                            qty: parseFloat(row.qty) || 0,
+                            nominal: nominal,
+                            terbayar: 0
+                        });
+                    }
                 });
 
-                // 2. TERJEMAHKAN CASHFLOW KE FORMAT DASHBOARD PWA
-                let serverCF = cfData.map(row => {
-                    let isMasuk = String(row.jenis).toLowerCase().includes("masuk");
-                    return {
-                        tgl: row.tanggal,
-                        metode: row.metode || "Cash",
-                        katCF: row.kategori || "Lainnya",
-                        relasi: row.relasi || "-",
-                        debet: isMasuk ? parseFloat(row.nominal) : 0,
-                        kredit: !isMasuk ? parseFloat(row.nominal) : 0,
-                        isPending: false
-                    };
-                });
+                // 2. MESIN SMART SWEEP (FIFO)
+                for (let r in rawByRelasi) {
+                    serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: rawByRelasi[r].alamat, dates: {}, riwayat: [] };
 
-                // --- PEMBERSIH HANTU PENDING / DATA LOKAL GANDA ---
+                    let listTagihan = rawByRelasi[r].tagihan.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+                    let listBayar = rawByRelasi[r].bayar.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+
+                    let groupedNota = {};
+                    listTagihan.forEach(item => {
+                        let tgl = item.tgl || "2000-01-01";
+                        if (!groupedNota[tgl]) {
+                            groupedNota[tgl] = { tgl: tgl, totalTagihan: 0, terbayar: 0, items: [] };
+                        }
+                        groupedNota[tgl].totalTagihan += item.nominal;
+                        // DIET: Buang atribut satuan agar lebih hemat string
+                        groupedNota[tgl].items.push({pakan: item.pakan, qty: item.qty, nominal: item.nominal});
+                    });
+
+                    let arrNota = Object.values(groupedNota).sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+
+                    let indexBayar = 0;
+                    for (let i = 0; i < arrNota.length; i++) {
+                        let nota = arrNota[i];
+                        let sisaHutangNota = nota.totalTagihan - nota.terbayar;
+
+                        while (sisaHutangNota > 0 && indexBayar < listBayar.length) {
+                            let uangMasuk = listBayar[indexBayar];
+                            if (uangMasuk.sisaBayar <= 0) {
+                                indexBayar++;
+                                continue;
+                            }
+
+                            let jumlahDipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
+                            
+                            if (jumlahDipotong > 0) {
+                                uangMasuk.detailPotongan.push({
+                                    tglNota: nota.tgl,
+                                    hutangSblm: sisaHutangNota,
+                                    jumlah: jumlahDipotong,
+                                    sisaAkhir: sisaHutangNota - jumlahDipotong
+                                });
+                            }
+
+                            nota.terbayar += jumlahDipotong;
+                            uangMasuk.sisaBayar -= jumlahDipotong;
+                            sisaHutangNota -= jumlahDipotong;
+
+                            if (uangMasuk.sisaBayar <= 0) indexBayar++;
+                        }
+                    }
+
+                    arrNota.forEach(nota => {
+                        let sisaNyata = nota.totalTagihan - nota.terbayar;
+                        if (sisaNyata > 0) {
+                            let parts = nota.tgl.split('-');
+                            let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : nota.tgl;
+
+                            let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
+                            dTrx.setHours(0, 0, 0, 0);
+                            let jtDate = new Date(dTrx);
+                            jtDate.setDate(jtDate.getDate() + 15);
+                            
+                            let telatNih = hariIni > jtDate;
+                            let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear().toString().substring(2);
+
+                            // DIET: Gunakan format Tgl Pendek untuk key dates
+                            serverData[r].dates[tglFormated] = {
+                                isLokal: false, tgl: tglFormated, tagihan: nota.totalTagihan, dp: nota.terbayar, sisaNyata: sisaNyata, jt: jtString, isTelat: telatNih, items: nota.items
+                            };
+
+                            serverData[r].total += sisaNyata;
+                            if (telatNih) serverData[r].totalTelat += sisaNyata;
+                            else serverData[r].totalSehat += sisaNyata;
+                        }
+                    });
+
+                    let sisaDeposit = 0;
+                    while(indexBayar < listBayar.length) {
+                        sisaDeposit += listBayar[indexBayar].sisaBayar;
+                        indexBayar++;
+                    }
+
+                    if (sisaDeposit > 0) {
+                        let tglDepo = ("0" + hariIni.getDate()).slice(-2) + "/" + ("0" + (hariIni.getMonth() + 1)).slice(-2) + "/" + hariIni.getFullYear();
+                        serverData[r].dates["DEPO-"+tglDepo] = {
+                            isLokal: false, tgl: tglDepo, tagihan: 0, dp: sisaDeposit, sisaNyata: -sisaDeposit, jt: "", isTelat: false,
+                            items: [{ pakan: "Deposit", qty: 0, nominal: -sisaDeposit }]
+                        };
+                        serverData[r].total -= sisaDeposit;
+                    }
+
+                    // E. 📝 BUNGKUS JEJAK RIWAYAT PEMBAYARAN (HANYA 5 TERAKHIR SAJA BIAR HEMAT!)
+                    let nf = new Intl.NumberFormat('id-ID');
+                    let riwayatTerbalik = [...listBayar].reverse().slice(0, 5);
+                    
+                    riwayatTerbalik.forEach(byr => {
+                        let bParts = byr.tgl.split('-');
+                        let bTglStr = bParts.length === 3 ? `${bParts[2]}/${bParts[1]}/${bParts[0].substring(2)}` : byr.tgl;
+                        
+                        let ketText = ``;
+                        if (byr.detailPotongan.length > 0) {
+                            ketText += `Potong:<br>`;
+                            byr.detailPotongan.forEach(pot => {
+                                let nParts = pot.tglNota.split('-');
+                                let nTglStr = nParts.length === 3 ? `${nParts[2]}/${nParts[1]}/${nParts[0].substring(2)}` : pot.tglNota;
+                                ketText += `• ${nTglStr}: (Rp ${nf.format(pot.hutangSblm)}) - Rp ${nf.format(pot.jumlah)} = Sisa Rp ${nf.format(pot.sisaAkhir)}<br>`;
+                            });
+                        }
+                        if (byr.sisaBayar > 0) ketText += `Sisa DP: Rp ${nf.format(byr.sisaBayar)}<br>`;
+                        if (ketText === '') ketText = `<i>Belum digunakan.</i>`;
+
+                        serverData[r].riwayat.push({
+                            tgl: bTglStr,
+                            nominal: byr.nominal,
+                            ket: ketText,
+                            link: ""
+                        });
+                    });
+                }
+
+                // SUNTIK DATA LOKAL & SIMPAN
+                let antrian = JSON.parse(localStorage.getItem('antrian_pakan') || "[]");
+                if (antrian.length === 0) {
+                    let piutangCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
+                    for (let k in piutangCache) {
+                        for (let d in piutangCache[k].dates) {
+                            piutangCache[k].dates[d].isLokal = false;
+                        }
+                    }
+                    try { localStorage.setItem('piutang_ptcbl_cache', JSON.stringify(piutangCache)); } catch(e){}
+                }
+
                 let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                let newPending = [];
-                let waktuSekarangMs = Date.now();
+                let hasPendingPiutang = pendingMaster.some(x => x.status === "Keluar" && x.relasi && !String(x.relasi).toLowerCase().includes("kandang"));
+                
+                let localData = hasPendingPiutang ? JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}") : {};
 
-                for (let p of pendingMaster) {
-                    let foundIdx = serverMaster.findIndex(s => s.tgl === p.tgl && s.relasi.toLowerCase() === p.relasi.toLowerCase() && s.pakan === p.pakan && s.qty === p.qty);
-                    // Jika data belum ada di server DAN umurnya masih kurang dari 2 Jam, biarkan di pending (Optimistic UI)
-                    if (foundIdx === -1 && (waktuSekarangMs - p.timestamp < 7200000)) { 
-                        newPending.push(p); 
+                for (let r in localData) {
+                    for (let d in localData[r].dates) {
+                        if (localData[r].dates[d].isLokal) {
+                            let parts = String(d).split('/');
+                            let normalizedDate = d;
+                            let telatNih = false;
+                            let jtString = "";
+
+                            if (parts.length === 3) {
+                                let fullYear = parts[2].length === 2 ? "20" + parts[2] : parts[2];
+                                normalizedDate = `${parts[0]}/${parts[1]}/${fullYear}`;
+                                
+                                let dTrx = new Date(fullYear, parts[1] - 1, parts[0]);
+                                dTrx.setHours(0, 0, 0, 0);
+                                let jtDate = new Date(dTrx);
+                                jtDate.setDate(jtDate.getDate() + 15);
+                                
+                                telatNih = hariIni > jtDate;
+                                jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear().toString().substring(2);
+                            }
+
+                            if (!serverData[r]) serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: localData[r].alamat, dates: {} };
+                            
+                            if (serverData[r].dates[normalizedDate] || serverData[r].dates[d]) {
+                                continue; 
+                            } else {
+                                localData[r].dates[d].isTelat = telatNih;
+                                localData[r].dates[d].jt = jtString;
+                                serverData[r].dates[d] = localData[r].dates[d];
+                                
+                                let sisaBaru = localData[r].dates[d].sisaNyata !== undefined ? localData[r].dates[d].sisaNyata : localData[r].dates[d].tagihan;
+                                serverData[r].total += sisaBaru;
+                                if (telatNih) serverData[r].totalTelat += sisaBaru;
+                                else serverData[r].totalSehat += sisaBaru;
+                            }
+                        }
                     }
                 }
-                localStorage.setItem('pending_master_data', JSON.stringify(newPending));
 
-                // BUNGKUS DAN SIMPAN KE MEMORI HP
-                let waktuSekarang = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-                localStorage.setItem(cacheKey, JSON.stringify({ rawMaster: serverMaster, rawCashflow: serverCF, waktuTarik: waktuSekarang }));
+                // Update UI PWA DENGAN PENANGKAP ERROR KALO TETEP MUNTUH
+                dataPiutangLokal = serverData;
+                let strBaru = JSON.stringify(serverData);
+                try {
+                    localStorage.setItem('piutang_ptcbl_cache', strBaru);
+                } catch(e) {
+                    console.log("Memory Full. Menghapus Cache Lama...");
+                    localStorage.removeItem('rekap_cbl_2026_1');
+                    localStorage.removeItem('rekap_cbl_2026_2');
+                    localStorage.removeItem('rekap_cbl_2026_3');
+                    localStorage.removeItem('rekap_cbl_2026_4');
+                    localStorage.removeItem('rekap_cbl_2026_5');
+                    localStorage.removeItem('rekap_cbl_2026_6');
+                    localStorage.setItem('piutang_ptcbl_cache', strBaru); // Coba paksa lagi
+                }
                 
-                currentBulan = bulan; currentTahun = tahun; rawCashflowGlobal = serverCF;
-                let currentPending = newPending.filter(x => x.tgl.startsWith(`${tahun}-${("0" + bulan).slice(-2)}`));
-                rawMasterGlobal = [...serverMaster, ...currentPending];
+                renderListPiutang();
 
-                document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">cloud_done</span> Data Supabase: ditarik ${waktuSekarang}`;
-                document.getElementById('info-cache').style.color = "#8AA624";
-                
-                // Eksekusi Render Layar!
-                terapkanFilter(); 
-                
-                // Buka kembali tanggal yang sedang diklik user (kalau ada)
-                let activeDate = document.querySelector('.cal-day.selected'); 
-                let activeDateId = activeDate ? activeDate.id.replace('cal-', '') : null;
-                if (activeDateId) klikTanggalMaster(activeDateId);
-
-            })
-            .catch(e => {
+            }).catch(err => {
                 document.getElementById('rekap-hasil').innerHTML = `<div style="color:red; text-align:center;">Gagal memuat: ${e.message}</div>`;
                 document.getElementById('info-cache').innerText = "Gagal menyinkronkan data."; 
                 document.getElementById('info-cache').style.color = "red";
@@ -4847,7 +4998,6 @@ async function prosesAntreanBackground() {
                     let catatanLengkap = String(row.catatan || "").toLowerCase();
                     let cKat = "Penjualan";
 
-                    // 🔥 LOGIKA KATEGORISASI BARU YANG LEBIH CERDAS
                     if (String(row.status).toLowerCase().includes("masuk")) {
                         if (catatanLengkap.includes("gudang") || namaRelasi.includes("mutasi")) cKat = "Mutasi";
                         else cKat = "Masuk";
@@ -4858,23 +5008,18 @@ async function prosesAntreanBackground() {
                         else cKat = "Penjualan";
                     }
 
-                    let pakan = row.pakan || 'Pakan'; 
-                    let qty = parseFloat(row.qty) || 0;
-                    let omzet = qty * (parseFloat(row.harga_satuan) || 0);
-                    let hpp = String(row.status).toLowerCase().includes('keluar') ? (parseFloat(row.total_hpp) || 0) : 0;
-
+                    // DIET KETAT: Hanya simpan integer & singkatan untuk hemat text JSON
                     return {
-                        bln: tglObj.getMonth() + 1,
-                        tglDb: tglObj.getDate(),
-                        gudang: row.cabang || 'PM',
-                        kat: cKat,
-                        catGroup: cKat, // Disamakan agar tidak ada bug "KATEGORI: KELUAR"
-                        status: String(row.status).toLowerCase(),
-                        pakan: pakan,
-                        qty: qty,
-                        omzet: omzet,
-                        hpp: hpp,
-                        relasi: row.relasi || '-'
+                        b: tglObj.getMonth() + 1, // bln -> b
+                        d: tglObj.getDate(), // tglDb -> d
+                        g: row.cabang === 'SPN' ? 2 : (row.cabang === 'RPH' ? 3 : 1), // gudang PM=1, SPN=2, RPH=3
+                        k: cKat, // kat
+                        s: String(row.status).toLowerCase().includes('keluar') ? 0 : 1, // status: 0=Keluar, 1=Masuk
+                        p: row.pakan || 'Pakan', // pakan
+                        q: parseFloat(row.qty) || 0, // qty
+                        o: (parseFloat(row.qty) || 0) * (parseFloat(row.harga_satuan) || 0), // omzet
+                        h: String(row.status).toLowerCase().includes('keluar') ? (parseFloat(row.total_hpp) || 0) : 0, // hpp
+                        r: row.relasi || '-' // relasi
                     };
                 });
 
@@ -4884,18 +5029,16 @@ async function prosesAntreanBackground() {
                     let isMasuk = String(row.jenis).toLowerCase().includes("masuk");
                     let nom = parseFloat(row.nominal) || 0;
                     return {
-                        bln: tglObj.getMonth() + 1,
-                        debet: isMasuk ? nom : 0,
-                        kredit: !isMasuk ? nom : 0,
-                        kat: row.kategori || "Lainnya",
-                        met: row.metode || "Cash",
-                        relasi: row.relasi || "-",
-                        tglFormat: `${("0"+tglObj.getDate()).slice(-2)}/${("0"+(tglObj.getMonth()+1)).slice(-2)}`,
-                        katCF: row.kategori || "Lainnya"
+                        b: tglObj.getMonth() + 1,
+                        db: isMasuk ? nom : 0,
+                        kr: !isMasuk ? nom : 0,
+                        k: row.kategori || "Lainnya",
+                        m: row.metode || "Cash",
+                        r: row.relasi || "-",
+                        tF: `${("0"+tglObj.getDate()).slice(-2)}/${("0"+(tglObj.getMonth()+1)).slice(-2)}`
                     };
                 });
 
-                // 3. AMBIL STATUS PIUTANG GLOBAL
                 let ptgCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
                 let rawKP = [];
                 for (let r in ptgCache) {
@@ -4904,9 +5047,16 @@ async function prosesAntreanBackground() {
                     if (item.totalSehat > 0) rawKP.push({ nominal: item.totalSehat, isTelat: false });
                 }
 
-                // 4. BUNGKUS DAN RENDER
+                // 4. BUNGKUS DAN RENDER (DENGAN TRY CATCH)
                 let finalRawData = { master: rawMaster, cf: rawCF, kp: rawKP };
-                localStorage.setItem(cacheKey, JSON.stringify(finalRawData)); 
+                
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify(finalRawData)); 
+                } catch(e) {
+                    console.log("Memory Full. Menghapus Cache Lain...");
+                    localStorage.removeItem('data_relasi_cbl');
+                    localStorage.setItem(cacheKey, JSON.stringify(finalRawData)); 
+                }
                 
                 let processedData = mesinKalkulasiPWA(finalRawData, bulan, tahun);
                 cacheDataGlobal = processedData; 
@@ -4941,54 +5091,51 @@ async function prosesAntreanBackground() {
 
             if (raw.master && raw.master.length > 0) {
                 raw.master.forEach(row => {
-                    // FIX: Paksa kategori jadi huruf kecil semua biar kebal terhadap error kapitalisasi!
-                    let katLower = String(row.kat || "").toLowerCase();
+                    let katLower = String(row.k || "").toLowerCase();
                     let isPenjualan = (katLower.includes('penjualan') || katLower === '');
-                    let p = row.pakan ? row.pakan.trim() : "Pakan";
+                    let p = row.p ? row.p.trim() : "Pakan";
+                    let isKeluar = row.s === 0;
 
-                    if (row.status === 'keluar' && isPenjualan) {
-                        // Rekam Omzet Tahunan
-                        let bKey = ("0" + row.bln).slice(-2);
-                        chartBln[bKey].o += row.omzet;
-                        chartBln[bKey].q += row.qty;
+                    if (isKeluar && isPenjualan) {
+                        let bKey = ("0" + row.b).slice(-2);
+                        chartBln[bKey].o += row.o;
+                        chartBln[bKey].q += row.q;
 
-                        // Masukin Pakan Sesuai Golongan Hardcode
                         let match = targetPakan.find(tp => p.toLowerCase() === tp.toLowerCase());
                         let keyPakan = match ? match : "Lainnya";
-                        trendPakan[keyPakan][row.bln - 1] += row.qty;
+                        trendPakan[keyPakan][row.b - 1] += row.q;
                     }
 
-                    if (!isFiltered || row.bln === fM) {
-                        if (katLower.includes("penjualan")) gudangQty[row.gudang].jual += row.qty;
-                        else if (katLower.includes("pemakaian")) gudangQty[row.gudang].pakai += row.qty;
-                        else if (katLower.includes("giling")) gudangQty[row.gudang].giling += row.qty;
-                        else if (katLower.includes("mutasi")) gudangQty[row.gudang].mutasi += row.qty;
-                        else if (katLower.includes("masuk") || row.status === 'masuk') gudangQty[row.gudang].masuk += row.qty;
+                    if (!isFiltered || row.b === fM) {
+                        let gudangName = row.g === 2 ? 'SPN' : (row.g === 3 ? 'RPH' : 'PM');
+                        if (katLower.includes("penjualan")) gudangQty[gudangName].jual += row.q;
+                        else if (katLower.includes("pemakaian")) gudangQty[gudangName].pakai += row.q;
+                        else if (katLower.includes("giling")) gudangQty[gudangName].giling += row.q;
+                        else if (katLower.includes("mutasi")) gudangQty[gudangName].mutasi += row.q;
+                        else if (katLower.includes("masuk") || !isKeluar) gudangQty[gudangName].masuk += row.q;
 
-                        if (row.status === 'keluar' && isPenjualan) {
-                            tOmzet += row.omzet; tHPP += row.hpp; tQty += row.qty;
-                            if (chartHari[row.tglDb]) { chartHari[row.tglDb].o += row.omzet; chartHari[row.tglDb].q += row.qty; }
+                        if (isKeluar && isPenjualan) {
+                            tOmzet += row.o; tHPP += row.h; tQty += row.q;
+                            if (chartHari[row.d]) { chartHari[row.d].o += row.o; chartHari[row.d].q += row.q; }
 
                             if (!produkMap[p]) produkMap[p] = { q: 0, o: 0, h: 0 };
-                            produkMap[p].q += row.qty;
-                            produkMap[p].o += row.omzet;
-                            produkMap[p].h += row.hpp;
+                            produkMap[p].q += row.q; produkMap[p].o += row.o; produkMap[p].h += row.h;
 
-                            let r = row.relasi || "Tanpa Nama";
+                            let r = row.r || "Tanpa Nama";
                             if (!konsumenMap[r]) konsumenMap[r] = { o: 0, q: 0 };
-                            konsumenMap[r].o += row.omzet; konsumenMap[r].q += row.qty;
+                            konsumenMap[r].o += row.o; konsumenMap[r].q += row.q;
 
                             if (!lossGainMap[r]) lossGainMap[r] = { curr: 0, prev: 0, items: {} };
                             if (!lossGainMap[r].items[p]) lossGainMap[r].items[p] = { curr: 0, prev: 0 };
-                            lossGainMap[r].curr += row.qty; lossGainMap[r].items[p].curr += row.qty;
+                            lossGainMap[r].curr += row.q; lossGainMap[r].items[p].curr += row.q;
                         }
                     }
 
-                    if (isFiltered && row.bln === prevM && row.status === 'keluar' && isPenjualan) {
-                        let r = row.relasi || "Tanpa Nama";
+                    if (isFiltered && row.b === prevM && isKeluar && isPenjualan) {
+                        let r = row.r || "Tanpa Nama";
                         if (!lossGainMap[r]) lossGainMap[r] = { curr: 0, prev: 0, items: {} };
                         if (!lossGainMap[r].items[p]) lossGainMap[r].items[p] = { curr: 0, prev: 0 };
-                        lossGainMap[r].prev += row.qty; lossGainMap[r].items[p].prev += row.qty;
+                        lossGainMap[r].prev += row.q; lossGainMap[r].items[p].prev += row.q;
                     }
                 });
             }
@@ -4996,9 +5143,9 @@ async function prosesAntreanBackground() {
             let rincianCF = [];
             if (raw.cf && raw.cf.length > 0) {
                 raw.cf.forEach(c => {
-                    if (!isFiltered || c.bln === fM) {
-                        tMasuk += c.debet; tOPR += c.kredit;
-                        if (c.kredit > 0) { let k = c.kat || "Lainnya"; oprMap[k] = (oprMap[k] || 0) + c.kredit; }
+                    if (!isFiltered || c.b === fM) {
+                        tMasuk += c.db; tOPR += c.kr;
+                        if (c.kr > 0) { let k = c.k || "Lainnya"; oprMap[k] = (oprMap[k] || 0) + c.kr; }
                         rincianCF.push(c);
                     }
                 });
