@@ -1321,25 +1321,26 @@
                 background: white !important;
             }
         }
-       /* =========================================
+      /* =========================================
            CSS KHUSUS LOGIN CUSTOM BACKGROUND 
-           (Fix Auto-Hilang & Full Screen)
+           (Fix Gambar Desktop & HP)
            ========================================= */
         .layar-login-custom {
-            /* Pasang URL gambar di sini agar permanen dan kebal reset */
-            background-image: url('https://raw.githubusercontent.com/wildansyif/cbl-pakan-beta/main/UI%20Login%20Screen.jpg'); 
-            background-size: cover; 
-            background-position: center bottom; /* Fokus ke area bawah agar sapi selalu terlihat */
-            background-repeat: no-repeat;
-            background-color: #f4f5f0;
-
-            /* Kunci agar dia SELALU full screen tanpa ruang kosong di bawah */
+            background-color: #f4f5f0 !important;
+            /* Perhatikan tanda kutip ganda "" di dalam url() ini penting untuk desktop */
+            background-image: url("https://raw.githubusercontent.com/wildansyif/cbl-pakan-beta/main/UI%20Login%20Screen.jpg"); 
+            background-position: center bottom !important; 
+            background-repeat: no-repeat !important;
+            
+            /* Kunci layar penuh, anti-scroll, anti-geser */
             position: fixed !important;
             top: 0 !important;
             left: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            z-index: 99999 !important; /* Kasta tertinggi, menutupi segalanya */
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            z-index: 99999 !important; 
             
             display: flex;
             flex-direction: column;
@@ -1349,9 +1350,24 @@
             padding: 0 !important;
         }
 
-        /* Saat class .hidden ditambahkan oleh JS, layar ini akan BENAR-BENAR HILANG */
-        .layar-login-custom.hidden {
-            display: none !important;
+        /* Khusus HP: Biar Background Sapinya tidak terpotong (Cover -> Contain) */
+        @media (max-width: 768px) {
+            .layar-login-custom {
+                background-size: cover !important; 
+            }
+            .login-interactive-area {
+                margin-top: 15vh !important; /* Dorong ke bawah sedikit di HP agar tidak nabrak teks */
+            }
+        }
+
+        /* Khusus Laptop/Desktop: Biar Background Proporsional */
+        @media (min-width: 769px) {
+            .layar-login-custom {
+                background-size: contain !important; /* Contain agar gambar tidak pecah/terpotong di layar lebar */
+            }
+            .login-interactive-area {
+                margin-top: 10vh !important; /* Posisi tengah di Laptop */
+            }
         }
 
         .login-interactive-area {
@@ -1359,7 +1375,7 @@
             max-width: 280px; 
             text-align: center;
             padding: 10px;
-            margin-top: -15vh; /* Tarik ke atas agar tidak menabrak sapi */
+            z-index: 2;
         }
 
         .login-pin-wrapper {
@@ -4053,13 +4069,17 @@ async function prosesAntreanBackground() {
 
         function cekLogin() {
             let pin = document.getElementById('pin').value;
-            if (USERS[pin]) {
+           if (USERS[pin]) {
                 currentLoggedPin = pin;
                 activeUser = USERS[pin]; document.getElementById('nama-petugas').innerText = activeUser;
-                document.getElementById('login-screen').classList.add('hidden'); document.getElementById('app-screen').classList.remove('hidden');
+                
+                // SULAP HILANGKAN LAYAR LOGIN SECARA PAKSA!
+                document.getElementById('login-screen').style.setProperty('display', 'none', 'important');
+                document.getElementById('app-screen').classList.remove('hidden');
                 
                 // MUNCULKAN MENU NAVIGASI SAAT LOGIN SUKSES
-                document.getElementById('main-nav').classList.remove('hidden');
+                let nav = document.getElementById('main-nav');
+                if (nav) nav.classList.remove('hidden');
 
                 let t = new Date();
                 let blnAktif = t.getMonth() + 1;
