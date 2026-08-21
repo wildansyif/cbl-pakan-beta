@@ -3219,6 +3219,34 @@
         const SUPA_URL = 'https://hwpbkdmaeqovhxttkrmj.supabase.co';
         const SUPA_ANON_KEY = 'sb_publishable_JAhHcT-Z-SZfLa3p9m3qvQ_WFAOew5A';
 
+        // ==========================================
+        // MESIN PENARIK DATA TANPA BATAS (BYPASS 1000 LIMIT)
+        // ==========================================
+        async function fetchSupabaseAll(url) {
+            let allData = [];
+            let offset = 0;
+            const limit = 1000;
+            let keepFetching = true;
+            
+            while (keepFetching) {
+                let separator = url.includes('?') ? '&' : '?';
+                let res = await fetch(`${url}${separator}offset=${offset}&limit=${limit}`, {
+                    headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
+                });
+                if (!res.ok) {
+                    let err = await res.json();
+                    throw new Error(err.message || "Gagal fetch data");
+                }
+                let data = await res.json();
+                allData = allData.concat(data);
+                
+                // Kalau data yang ditarik kurang dari 1000, artinya sudah habis
+                if (data.length < limit) keepFetching = false;
+                else offset += limit; 
+            }
+            return allData;
+        }
+
         async function testKirimSupabase() {
         const payloadData = {
         cabang: "PM",
@@ -4506,18 +4534,17 @@ async function prosesAntreanBackground() {
             document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:14px; vertical-align:middle;">sync</span> Menyinkronkan data...`; 
             document.getElementById('info-cache').style.color = "#FEA405";
 
-            // Siapkan parameter rentang waktu untuk Supabase (1 Bulan Full)
+            // Perbaikan Zona Waktu agar Tgl 31 tidak hilang
             let startDate = `${tahun}-${("0" + bulan).slice(-2)}-01`;
-            let endDate = new Date(tahun, bulan, 0).toISOString().split('T')[0];
+            let lastDate = new Date(tahun, bulan, 0); 
+            let endDay = ("0" + lastDate.getDate()).slice(-2);
+            let endMonth = ("0" + (lastDate.getMonth() + 1)).slice(-2);
+            let endDate = `${tahun}-${endMonth}-${endDay}`;
 
-            // 🚀 TEMBAK KE DUA TABEL SEKALIGUS (TRANSAKSI PAKAN & CASHFLOW)
+            // 🚀 TEMBAK KE DUA TABEL SEKALIGUS (TANPA BATAS)
             Promise.all([
-                fetch(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, {
-                    headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
-                }).then(r => r.json()),
-                fetch(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, {
-                    headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
-                }).then(r => r.json())
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`),
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`)
             ])
             .then(([masterData, cfData]) => {
                 if (masterData.error || cfData.error) {
@@ -4804,10 +4831,10 @@ async function prosesAntreanBackground() {
             let startDate = `${tahun}-01-01`;
             let endDate = `${tahun}-12-31`;
 
-            // 🚀 TEMBAK KE 2 TABEL SUPABASE SAJA (Lebih Cepat & Hemat Kuota!)
+            // 🚀 TEMBAK KE 2 TABEL SUPABASE (TANPA BATAS LIMIT)
             Promise.all([
-                fetch(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
-                fetch(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`),
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`)
             ])
             .then(([masterData, cfData]) => {
                 if (!Array.isArray(masterData)) throw new Error(masterData.message || "Gagal memuat transaksi pakan");
@@ -5301,8 +5328,9 @@ async function prosesAntreanBackground() {
 
             if (!navigator.onLine) return;
             
-            // 🚀 TEMBAK KE KACAMATA PIUTANG SUPABASE
-            fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?select=*`, {
+            // 🚀 TEMBAK KE KACAMATA PIUTANG SUPABASE (TANPA BATAS)
+            fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?select=*`)
+            .then(data => {
                 headers: {
                     'apikey': SUPA_ANON_KEY,
                     'Authorization': `Bearer ${SUPA_ANON_KEY}`
@@ -7598,8 +7626,8 @@ async function prosesAntreanBackground() {
             document.getElementById('analytics-loader').classList.remove('hidden');
 
             Promise.all([
-                fetch(`${SUPA_URL}/rest/v1/master_relasi?nama=eq.${encodeURIComponent(namaRelasi)}&select=*`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json()),
-                fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaRelasi)}&order=tanggal.asc`, { headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` } }).then(r => r.json())
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/master_relasi?nama=eq.${encodeURIComponent(namaRelasi)}&select=*`),
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaRelasi)}&order=tanggal.asc`)
             ])
             .then(([profilData, mutasiData]) => {
                 document.getElementById('analytics-loader').classList.add('hidden');
@@ -8224,7 +8252,8 @@ async function prosesAntreanBackground() {
 
             let tahunPilihan = document.getElementById('pilihan-tahun-es') ? document.getElementById('pilihan-tahun-es').value : new Date().getFullYear();
 
-            fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaKonsumen)}&order=tanggal.asc`, {
+            fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaKonsumen)}&order=tanggal.asc`)
+            .then(resData => {
                 headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
             })
             .then(r => r.json())
