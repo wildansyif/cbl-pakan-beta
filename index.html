@@ -4808,22 +4808,22 @@ async function prosesAntreanBackground() {
                     let catatanLengkap = String(row.catatan || "").toLowerCase();
                     let cKat = "Penjualan";
 
+                    let kelompokSapi = ['bx', 'domba', 'rd', 'rl', 'darbun', 'laktasi', 'kapalang', 'dewasa', 'jantan', 'pedet', 'kerbau', 'bunting'];
+
                     if (String(row.status).toLowerCase().includes("masuk")) {
                         if (catatanLengkap.includes("gudang") || namaRelasi.includes("mutasi")) cKat = "Mutasi";
                         else cKat = "Masuk";
                     } else {
-                        if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) {
+                        if (namaRelasi === "rd" || namaRelasi === "rl" || namaRelasi === "darbun" || namaRelasi === "laktasi") {
                             cKat = "Giling";
                         } 
-                        // Tambahkan semua nama kelompok sapi sebagai "Pemakaian"
-                        else if (String(row.cabang).toLowerCase().includes('kandang') || namaRelasi.includes("kandang") || 
-                                 namaRelasi.includes('kapalang') || namaRelasi.includes('dewasa') || 
-                                 namaRelasi.includes('jantan') || namaRelasi.includes('pedet') || 
-                                 namaRelasi.includes('kerbau') || namaRelasi.includes('bunting')) {
-                            cKat = "Pemakaian";
-                        } 
-                        else if (namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) {
-                            cKat = "Mutasi";
+                        else if (cabangLower.includes('kandang') || namaRelasi.includes("kandang") || 
+                                 namaRelasi.includes("rph") || namaRelasi.includes("spn") || 
+                                 namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan") || 
+                                 namaRelasi.includes("mutasi") ||
+                                 kelompokSapi.includes(namaRelasi)) {
+                            cKat = "Pemakaian"; // Hewan dan Internal digabung masuk ke Pemakaian / Mutasi
+                            if (namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan") || namaRelasi.includes("mutasi")) cKat = "Mutasi";
                         } 
                         else {
                             cKat = "Penjualan";
