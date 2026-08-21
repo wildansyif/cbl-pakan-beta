@@ -5290,7 +5290,6 @@ async function prosesAntreanBackground() {
                 return;
             }
 
-            // 🚀 TARIK DARI VIEW REKAP PIUTANG (SUPER RINGAN, CUMA NAMA & SALDO)
             fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_rekap_piutang?sisa_piutang=neq.0&select=*`)
             .then(data => {
                 document.getElementById('piutang-loader').classList.add('hidden');
@@ -5298,16 +5297,18 @@ async function prosesAntreanBackground() {
                 if (data.error) throw new Error(data.message);
 
                 let serverData = {};
-                data.sort((a, b) => b.sisa_piutang - a.sisa_piutang); // Urutkan dari hutang terbesar
+                data.sort((a, b) => b.sisa_piutang - a.sisa_piutang);
 
                 data.forEach(d => {
                     let rLower = String(d.relasi).toLowerCase();
                     let kelompokSapi = ['bx', 'domba', 'rd', 'rl', 'darbun', 'laktasi', 'kapalang', 'dewasa', 'jantan', 'pedet', 'kerbau', 'bunting'];
                     if (rLower.includes('kandang') || rLower.includes('spn') || rLower.includes('rph') || rLower.includes('cibulakan') || rLower.includes('pembibitan') || kelompokSapi.includes(rLower)) return;
-                    
+
                     serverData[d.relasi] = {
                         total_sisa: parseFloat(d.sisa_piutang),
-                        isLoaded: false, // Penanda rincian belum disedot
+                        total_telat: parseFloat(d.piutang_telat),
+                        total_sehat: parseFloat(d.piutang_sehat),
+                        isLoaded: false,
                         dates: {},
                         riwayat: []
                     };
@@ -5323,8 +5324,6 @@ async function prosesAntreanBackground() {
             });
         }
 
-        // MESIN KEDUA: PENYEDOT RINCIAN (KHUSUS NAMA YANG DIKLIK & HARGA AKURAT + RETUR)
-        // MESIN KEDUA: PENYEDOT RINCIAN (SEDOT MATANG DARI SUPABASE)
         function bukaDetailPiutang(namaRelasi, safeClass, totalSisa) {
             let container = document.getElementById(`det_piutang_${safeClass}`);
             let content = document.getElementById(`content_det_${safeClass}`);
@@ -5339,7 +5338,6 @@ async function prosesAntreanBackground() {
 
             if (!navigator.onLine) { alert("Wajib online untuk melihat rincian pertama kali!"); container.classList.add('hidden'); return; }
 
-            // 🚀 KARENA VIEW SUPABASE SUDAH DIPERBAIKI, KITA TINGGAL SEDOT YANG MATANG!
             fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaRelasi)}&order=tanggal.asc`)
             .then(data => {
                 let rawTagihan = []; let rawBayar = [];
@@ -5348,13 +5346,13 @@ async function prosesAntreanBackground() {
                     let isBayar = row.jenis_mutasi === "Pembayaran";
                     if (isBayar) {
                         let nomCF = parseFloat(row.pembayaran) || 0;
-                        rawBayar.push({ tgl: row.tanggal, nominal: nomCF, sisaBayar: nomCF, detailPotongan: [] });
+                        // URL Bukti berhasil kita angkut kembali!
+                        rawBayar.push({ tgl: row.tanggal, nominal: nomCF, sisaBayar: nomCF, detailPotongan: [], bukti_url: row.bukti_url });
                     } else {
-                        // Tagihan (Bisa positif, bisa negatif kalau retur)
                         let isRetur = row.jenis_mutasi === "Retur Barang";
                         let nominalTagihan = parseFloat(row.tagihan) || 0;
                         let qtyTagihan = parseFloat(row.qty) || 0;
-                        if (isRetur && qtyTagihan > 0) qtyTagihan = -qtyTagihan; // Biar UI nampilin minus qty juga
+                        if (isRetur && qtyTagihan > 0) qtyTagihan = -qtyTagihan;
                         
                         rawTagihan.push({ 
                             tgl: row.tanggal, 
@@ -5367,7 +5365,6 @@ async function prosesAntreanBackground() {
                     }
                 });
 
-                // 3. MESIN FIFO SMART SWEEP KHUSUS ORANG INI
                 let listTagihan = rawTagihan.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
                 let listBayar = rawBayar.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
                 let groupedNota = {};
@@ -5392,7 +5389,6 @@ async function prosesAntreanBackground() {
                     }
                 }
 
-                // 4. SUSUN UI HTML RINCIAN
                 let nf = new Intl.NumberFormat('id-ID'); let hariIni = new Date(); hariIni.setHours(0,0,0,0);
                 let htmlItems = ""; let totalSisaKalkulasi = 0;
 
@@ -5402,10 +5398,24 @@ async function prosesAntreanBackground() {
                         let parts = nota.tgl.split('-');
                         let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : nota.tgl;
                         let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
-                        dTrx.setHours(0, 0, 0, 0); let jtDate = new Date(dTrx); jtDate.setDate(jtDate.getDate() + 15);
-                        let telatNih = hariIni > jtDate; let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear().toString().substring(2);
+                        dTrx.setHours(0, 0, 0, 0); 
+                        
+                        let jtDate = new Date(dTrx); jtDate.setDate(jtDate.getDate() + 15);
+                        
+                        // LOGIKA COUNTDOWN JATUH TEMPO BARU
+                        let selisihHari = Math.ceil((jtDate.getTime() - hariIni.getTime()) / (1000 * 60 * 60 * 24));
+                        let telatNih = selisihHari < 0;
+                        
+                        let statusJtTxt = "";
+                        if (selisihHari < 0) {
+                            statusJtTxt = `Terlambat ${Math.abs(selisihHari)} hari`;
+                        } else if (selisihHari === 0) {
+                            statusJtTxt = `Jatuh Tempo Hari Ini`;
+                        } else {
+                            statusJtTxt = `H-${selisihHari}`;
+                        }
 
-                        dataPiutangLokal[namaRelasi].dates[tglFormated] = { isLokal: false, tgl: tglFormated, tagihan: nota.totalTagihan, dp: nota.terbayar, sisaNyata: sisaNyata, jt: jtString, isTelat: telatNih, items: nota.items };
+                        dataPiutangLokal[namaRelasi].dates[tglFormated] = { isLokal: false, tgl: tglFormated, tagihan: nota.totalTagihan, dp: nota.terbayar, sisaNyata: sisaNyata, jt: statusJtTxt, isTelat: telatNih, items: nota.items };
                         totalSisaKalkulasi += sisaNyata;
 
                         let rincianHtml = nota.items.map(it => {
@@ -5432,7 +5442,7 @@ async function prosesAntreanBackground() {
                                   <input type="checkbox" id="chk_${safeClass}_${tglFormated.replace(/\//g,'')}" class="chk-inv-${safeClass}" value='${valStr}' data-nominal="${sisaNyata}" style="width:20px; height:20px; margin-top:2px;" checked onchange="hitungPreviewSubtotal('${safeClass}')">
                                   <div style="cursor:pointer; line-height:1.2;" onclick="document.getElementById('rincian_${safeClass}_${tglFormated.replace(/\//g,'')}').classList.toggle('hidden')">
                                       <b style="color:#8AA624; font-size:13px;">${lampu} ${tglFormated}</b><br>
-                                      <span style="font-size:10px; font-weight:bold; color:${warnaJT};">${jtString ? 'JT: '+jtString : ''}</span><br>
+                                      <span style="font-size:10px; font-weight:bold; color:${warnaJT};">${statusJtTxt}</span><br>
                                       <span style="font-size:10px; color:#888;">(Lihat rincian ▾)</span>
                                   </div>
                               </div>
@@ -5451,7 +5461,6 @@ async function prosesAntreanBackground() {
                     totalSisaKalkulasi -= sisaDeposit;
                 }
 
-                // 5. RIWAYAT BAYAR TERAKHIR
                 let riwayatTerbalik = [...listBayar].reverse().slice(0, 5);
                 let riwayatHtml = "";
                 if (riwayatTerbalik.length > 0) {
@@ -5471,9 +5480,12 @@ async function prosesAntreanBackground() {
                         if (byr.sisaBayar > 0) ketText += `Sisa DP: Rp ${nf.format(byr.sisaBayar)}<br>`;
                         if (ketText === '') ketText = `<i>Belum digunakan.</i>`;
 
+                        // TOMBOL BUKTI TF DIBANGKITKAN KEMBALI
+                        let linkBukti = (byr.bukti_url && byr.bukti_url.length > 5 && byr.bukti_url !== "-") ? `<a href="${byr.bukti_url}" target="_blank" onclick="event.stopPropagation();" style="margin-left:5px; background:#e3f2fd; padding:3px 8px; border-radius:12px; color:#1565c0; text-decoration:none; display:inline-flex; align-items:center; gap:3px;"><span class="material-symbols-outlined" style="font-size:12px;">receipt_long</span> Bukti TF</a>` : "";
+
                         riwayatHtml += `<div style="background:#f8fdf4; border:1px solid #DBE4C9; border-radius:6px; padding:8px; margin-bottom:6px; cursor:pointer;" onclick="document.getElementById('det_rw_${safeClass}_${idxRw}').classList.toggle('hidden')">
                           <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:4px;">
-                              <div><span style="font-weight:bold; font-size:11px;">Tgl Bayar: ${bTglStr}</span></div>
+                              <div><span style="font-weight:bold; font-size:11px;">Tgl Bayar: ${bTglStr}</span> ${linkBukti}</div>
                               <span style="color:#8AA624; font-weight:bold; font-size:11px;">+ Rp ${nf.format(byr.nominal)}</span>
                           </div>
                           <div id="det_rw_${safeClass}_${idxRw}" class="hidden" style="margin-top:6px; font-size:10px; color:#555; line-height:1.4;">${ketText}</div>
@@ -5482,7 +5494,6 @@ async function prosesAntreanBackground() {
                     riwayatHtml += `</div></div>`;
                 }
 
-                // 6. RENDER TOMBOL & KUMPULAN HTML
                 let actionButtons = "";
                 if (totalSisaKalkulasi > 0 && htmlItems !== "") {
                     actionButtons = `
@@ -5537,11 +5548,21 @@ async function prosesAntreanBackground() {
                 let safeClass = namaKey.replace(/[\s\W]/g, '');
                 
                 let isDeposit = d.total_sisa < 0;
-                let warnaBorder = isDeposit ? "#8AA624" : "#c62828";
+                let warnaBorder = isDeposit ? "#8AA624" : (d.total_telat > 0 ? "#c62828" : "#8AA624");
                 let displayTotal = isDeposit ? `- Rp ${nf.format(Math.abs(d.total_sisa))}` : `Rp ${nf.format(d.total_sisa)}`;
-                let teksStatus = isDeposit ? 
-                    `<div style="margin-top:4px;"><small style="color:#8AA624; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">account_balance_wallet</span> Deposit / Lebih Bayar</small></div>` :
-                    `<div style="margin-top:4px;"><small style="color:#c62828; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">warning</span> Ada Tunggakan</small></div>`;
+                
+                let teksStatus = "";
+                if (isDeposit) {
+                    teksStatus = `<div style="margin-top:4px;"><small style="color:#8AA624; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">account_balance_wallet</span> Deposit / Lebih Bayar</small></div>`;
+                } else {
+                    if (d.total_telat > 0 && d.total_sehat > 0) {
+                        teksStatus = `<div style="line-height:1.4; margin-top:4px;"><small style="color:#c62828; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">warning</span> Telat: Rp ${nf.format(d.total_telat)}</small><br><small style="color:#8AA624; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">task_alt</span> Sehat: Rp ${nf.format(d.total_sehat)}</small></div>`;
+                    } else if (d.total_telat > 0) {
+                        teksStatus = `<div style="margin-top:4px;"><small style="color:#c62828; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">warning</span> Telat: Rp ${nf.format(d.total_telat)}</small></div>`;
+                    } else {
+                        teksStatus = `<div style="margin-top:4px;"><small style="color:#8AA624; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">task_alt</span> Sehat: Rp ${nf.format(d.total_sehat)}</small></div>`;
+                    }
+                }
 
                 html += `<div class="rekap-card card-piutang-item" data-nama="${namaKey.toLowerCase()}" style="border-left: 4px solid ${warnaBorder}; margin-bottom: 12px; background: ${isDeposit ? '#f8fdf4' : '#fff'};">
                       <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="bukaDetailPiutang('${namaKey}', '${safeClass}', ${d.total_sisa})">
