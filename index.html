@@ -4507,15 +4507,13 @@ async function prosesAntreanBackground() {
             let cacheKey = `rekap_cbl_${tahun}_${bulan}`; 
             let savedData = localStorage.getItem(cacheKey);
 
-            // Jika ada cache lokal dan user tidak menekan tombol Sinkron, tampilkan instan (0 detik)
             if (savedData && !forceRefresh) {
                 let parsed = JSON.parse(savedData);
-                let serverMaster = parsed.rawMaster;
                 rawCashflowGlobal = parsed.rawCashflow;
                 currentBulan = bulan; currentTahun = tahun;
                 let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
                 let currentPending = pendingMaster.filter(x => x.tgl.startsWith(`${tahun}-${("0" + bulan).slice(-2)}`));
-                rawMasterGlobal = [...serverMaster, ...currentPending];
+                rawMasterGlobal = [...parsed.rawMaster, ...currentPending];
                 document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">task_alt</span> Data Offline: ditarik ${parsed.waktuTarik}`; document.getElementById('info-cache').style.color = "#8AA624";
                 document.getElementById('rekap-calendar').classList.remove('hidden'); terapkanFilter();
                 return;
@@ -4526,7 +4524,6 @@ async function prosesAntreanBackground() {
                 return; 
             }
 
-            // Bersihkan layar untuk menyambut data baru
             document.getElementById('rekap-summary-container').innerHTML = ""; 
             document.getElementById('rekap-calendar').classList.add('hidden'); 
             document.getElementById('btn-copy-rekap').classList.add('hidden');
@@ -4534,260 +4531,73 @@ async function prosesAntreanBackground() {
             document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:14px; vertical-align:middle;">sync</span> Menyinkronkan data...`; 
             document.getElementById('info-cache').style.color = "#FEA405";
 
-            // Perbaikan Zona Waktu agar Tgl 31 tidak hilang
             let startDate = `${tahun}-${("0" + bulan).slice(-2)}-01`;
             let lastDate = new Date(tahun, bulan, 0); 
             let endDay = ("0" + lastDate.getDate()).slice(-2);
             let endMonth = ("0" + (lastDate.getMonth() + 1)).slice(-2);
             let endDate = `${tahun}-${endMonth}-${endDay}`;
 
-            // 🚀 TEMBAK KE DUA TABEL SEKALIGUS (TANPA BATAS)
+            // 🚀 TEMBAK KE TABEL SUPABASE TAPI HANYA KOLOM YANG DIBUTUHKAN (SUPER CEPAT)
             Promise.all([
-                fetchSupabaseAll(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`),
-                fetchSupabaseAll(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=*`)
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/transaksi_pakan?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=tanggal,waktu_input,cabang,status,relasi,pakan,qty,catatan`),
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/cashflow?tanggal=gte.${startDate}&tanggal=lte.${endDate}&select=tanggal,jenis,metode,kategori,relasi,nominal`)
             ])
             .then(([masterData, cfData]) => {
-                if (masterData.error || cfData.error) {
-                    throw new Error(masterData.message || cfData.message);
-                }
+                if (masterData.error || cfData.error) throw new Error(masterData.message || cfData.message);
 
-                // 🛠️ Menerjemahkan data Supabase & MENJALANKAN FIFO SMART SWEEP
-                let serverData = {};
-                let hariIni = new Date();
-                hariIni.setHours(0, 0, 0, 0);
+                let serverMaster = masterData.map(row => {
+                    let cKat = "Penjualan"; let cGroup = "Keluar";
+                    let namaRelasi = String(row.relasi).toLowerCase();
+                    let catatanLengkap = String(row.catatan || "").toLowerCase();
+                    let cabangLower = String(row.cabang).toLowerCase();
 
-                let rawByRelasi = {};
-
-                data.forEach(row => {
-                    let r = String(row.relasi || "").trim();
-                    if (!r || r === "-") return;
-
-                    let rLower = r.toLowerCase();
-                    if (rLower.includes('rd') || rLower.includes('rl') || rLower.includes('pembibitan') || 
-                        rLower.includes('spn') || rLower.includes('rph') || rLower.includes('cibulakan') || 
-                        rLower.includes('kandang')) {
-                        return; 
-                    }
-                    
-                    if (!rawByRelasi[r]) {
-                        rawByRelasi[r] = { tagihan: [], bayar: [], alamat: row.alamat || '-' };
-                    }
-
-                    let nominal = parseFloat(row.nominal) || parseFloat(row.tagihan) || parseFloat(row.debet) || ((parseFloat(row.qty)||0) * (parseFloat(row.harga_satuan)||0)) || 0;
-
-                    if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
-                        // DIET: Buang bukti_url dari cache bayar, ambil tanggal & nominal saja
-                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [] });
+                    // 🔥 LOGIKA OTAK AKUNTAN V4 (TERMASUK BX, DOMBA, DLL)
+                    if (String(row.status).toLowerCase().includes("masuk")) {
+                        cGroup = "Masuk";
+                        if (catatanLengkap.includes("gudang") || namaRelasi.includes("mutasi")) cKat = "Mutasi";
+                        else cKat = "Masuk";
                     } else {
-                        // DIET: Hanya simpan info sangat esensial
-                        rawByRelasi[r].tagihan.push({
-                            tgl: row.tanggal,
-                            pakan: row.pakan_kategori || 'Pakan',
-                            qty: parseFloat(row.qty) || 0,
-                            nominal: nominal,
-                            terbayar: 0
-                        });
+                        if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) {
+                            cKat = "Giling";
+                        } 
+                        else if (cabangLower.includes('kandang') || namaRelasi.includes("kandang") || 
+                                 namaRelasi.includes('kapalang') || namaRelasi.includes('dewasa') || 
+                                 namaRelasi.includes('jantan') || namaRelasi.includes('pedet') || 
+                                 namaRelasi.includes('kerbau') || namaRelasi.includes('bunting') ||
+                                 namaRelasi.includes('bx') || namaRelasi.includes('domba')) {
+                            cKat = "Pemakaian";
+                        } 
+                        else if (namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) {
+                            cKat = "Mutasi";
+                        } 
+                        else {
+                            cKat = "Penjualan";
+                        }
                     }
+
+                    return {
+                        tgl: row.tanggal, gudang: row.cabang, kat: cKat, catGroup: cGroup, status: row.status, relasi: row.relasi, pakan: row.pakan, qty: parseFloat(row.qty) || 0, isPending: false, timestamp: new Date(row.waktu_input || row.tanggal).getTime()
+                    };
                 });
 
-                // 2. MESIN SMART SWEEP (FIFO)
-                for (let r in rawByRelasi) {
-                    serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: "-", dates: {}, riwayat: [] };
+                let serverCF = cfData.map(row => {
+                    let isMasuk = String(row.jenis).toLowerCase().includes("masuk");
+                    return { tgl: row.tanggal, metode: row.metode || "Cash", katCF: row.kategori || "Lainnya", relasi: row.relasi || "-", debet: isMasuk ? parseFloat(row.nominal) : 0, kredit: !isMasuk ? parseFloat(row.nominal) : 0, isPending: false };
+                });
 
-                    let listTagihan = rawByRelasi[r].tagihan.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
-                    let listBayar = rawByRelasi[r].bayar.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
-
-                    let groupedNota = {};
-                    listTagihan.forEach(item => {
-                        let tgl = item.tgl || "2000-01-01";
-                        if (!groupedNota[tgl]) {
-                            groupedNota[tgl] = { tgl: tgl, totalTagihan: 0, terbayar: 0, items: [] };
-                        }
-                        groupedNota[tgl].totalTagihan += item.nominal;
-                        // DIET: Buang atribut satuan agar lebih hemat string
-                        groupedNota[tgl].items.push({pakan: item.pakan, qty: item.qty, nominal: item.nominal});
-                    });
-
-                    let arrNota = Object.values(groupedNota).sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
-
-                    let indexBayar = 0;
-                    for (let i = 0; i < arrNota.length; i++) {
-                        let nota = arrNota[i];
-                        let sisaHutangNota = nota.totalTagihan - nota.terbayar;
-
-                        while (sisaHutangNota > 0 && indexBayar < listBayar.length) {
-                            let uangMasuk = listBayar[indexBayar];
-                            if (uangMasuk.sisaBayar <= 0) {
-                                indexBayar++;
-                                continue;
-                            }
-
-                            let jumlahDipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
-                            
-                            if (jumlahDipotong > 0) {
-                                uangMasuk.detailPotongan.push({
-                                    tglNota: nota.tgl,
-                                    hutangSblm: sisaHutangNota,
-                                    jumlah: jumlahDipotong,
-                                    sisaAkhir: sisaHutangNota - jumlahDipotong
-                                });
-                            }
-
-                            nota.terbayar += jumlahDipotong;
-                            uangMasuk.sisaBayar -= jumlahDipotong;
-                            sisaHutangNota -= jumlahDipotong;
-
-                            if (uangMasuk.sisaBayar <= 0) indexBayar++;
-                        }
-                    }
-
-                    arrNota.forEach(nota => {
-                        let sisaNyata = nota.totalTagihan - nota.terbayar;
-                        if (sisaNyata > 0) {
-                            let parts = nota.tgl.split('-');
-                            let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : nota.tgl;
-
-                            let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
-                            dTrx.setHours(0, 0, 0, 0);
-                            let jtDate = new Date(dTrx);
-                            jtDate.setDate(jtDate.getDate() + 15);
-                            
-                            let telatNih = hariIni > jtDate;
-                            let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear().toString().substring(2);
-
-                            // DIET: Gunakan format Tgl Pendek untuk key dates
-                            serverData[r].dates[tglFormated] = {
-                                isLokal: false, tgl: tglFormated, tagihan: nota.totalTagihan, dp: nota.terbayar, sisaNyata: sisaNyata, jt: jtString, isTelat: telatNih, items: nota.items
-                            };
-
-                            serverData[r].total += sisaNyata;
-                            if (telatNih) serverData[r].totalTelat += sisaNyata;
-                            else serverData[r].totalSehat += sisaNyata;
-                        }
-                    });
-
-                    let sisaDeposit = 0;
-                    while(indexBayar < listBayar.length) {
-                        sisaDeposit += listBayar[indexBayar].sisaBayar;
-                        indexBayar++;
-                    }
-
-                    if (sisaDeposit > 0) {
-                        let tglDepo = ("0" + hariIni.getDate()).slice(-2) + "/" + ("0" + (hariIni.getMonth() + 1)).slice(-2) + "/" + hariIni.getFullYear();
-                        serverData[r].dates["DEPO-"+tglDepo] = {
-                            isLokal: false, tgl: tglDepo, tagihan: 0, dp: sisaDeposit, sisaNyata: -sisaDeposit, jt: "", isTelat: false,
-                            items: [{ pakan: "Deposit", qty: 0, nominal: -sisaDeposit }]
-                        };
-                        serverData[r].total -= sisaDeposit;
-                    }
-
-                    // E. 📝 BUNGKUS JEJAK RIWAYAT PEMBAYARAN (HANYA 5 TERAKHIR SAJA BIAR HEMAT!)
-                    let nf = new Intl.NumberFormat('id-ID');
-                    let riwayatTerbalik = [...listBayar].reverse().slice(0, 5);
-                    
-                    riwayatTerbalik.forEach(byr => {
-                        let bParts = byr.tgl.split('-');
-                        let bTglStr = bParts.length === 3 ? `${bParts[2]}/${bParts[1]}/${bParts[0].substring(2)}` : byr.tgl;
-                        
-                        let ketText = ``;
-                        if (byr.detailPotongan.length > 0) {
-                            ketText += `Potong:<br>`;
-                            byr.detailPotongan.forEach(pot => {
-                                let nParts = pot.tglNota.split('-');
-                                let nTglStr = nParts.length === 3 ? `${nParts[2]}/${nParts[1]}/${nParts[0].substring(2)}` : pot.tglNota;
-                                ketText += `• ${nTglStr}: (Rp ${nf.format(pot.hutangSblm)}) - Rp ${nf.format(pot.jumlah)} = Sisa Rp ${nf.format(pot.sisaAkhir)}<br>`;
-                            });
-                        }
-                        if (byr.sisaBayar > 0) ketText += `Sisa DP: Rp ${nf.format(byr.sisaBayar)}<br>`;
-                        if (ketText === '') ketText = `<i>Belum digunakan.</i>`;
-
-                        serverData[r].riwayat.push({
-                            tgl: bTglStr,
-                            nominal: byr.nominal,
-                            ket: ketText,
-                            link: ""
-                        });
-                    });
-                }
-
-                // SUNTIK DATA LOKAL & SIMPAN
-                let antrian = JSON.parse(localStorage.getItem('antrian_pakan') || "[]");
-                if (antrian.length === 0) {
-                    let piutangCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
-                    for (let k in piutangCache) {
-                        for (let d in piutangCache[k].dates) {
-                            piutangCache[k].dates[d].isLokal = false;
-                        }
-                    }
-                    try { localStorage.setItem('piutang_ptcbl_cache', JSON.stringify(piutangCache)); } catch(e){}
-                }
-
-                let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                let hasPendingPiutang = pendingMaster.some(x => x.status === "Keluar" && x.relasi && !String(x.relasi).toLowerCase().includes("kandang"));
+                let waktuSekarang = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+                localStorage.setItem(cacheKey, JSON.stringify({ rawMaster: serverMaster, rawCashflow: serverCF, waktuTarik: waktuSekarang }));
                 
-                let localData = hasPendingPiutang ? JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}") : {};
+                currentBulan = bulan; currentTahun = tahun; rawCashflowGlobal = serverCF; rawMasterGlobal = serverMaster;
 
-                for (let r in localData) {
-                    for (let d in localData[r].dates) {
-                        if (localData[r].dates[d].isLokal) {
-                            let parts = String(d).split('/');
-                            let normalizedDate = d;
-                            let telatNih = false;
-                            let jtString = "";
-
-                            if (parts.length === 3) {
-                                let fullYear = parts[2].length === 2 ? "20" + parts[2] : parts[2];
-                                normalizedDate = `${parts[0]}/${parts[1]}/${fullYear}`;
-                                
-                                let dTrx = new Date(fullYear, parts[1] - 1, parts[0]);
-                                dTrx.setHours(0, 0, 0, 0);
-                                let jtDate = new Date(dTrx);
-                                jtDate.setDate(jtDate.getDate() + 15);
-                                
-                                telatNih = hariIni > jtDate;
-                                jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear().toString().substring(2);
-                            }
-
-                            if (!serverData[r]) serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: localData[r].alamat, dates: {} };
-                            
-                            if (serverData[r].dates[normalizedDate] || serverData[r].dates[d]) {
-                                continue; 
-                            } else {
-                                localData[r].dates[d].isTelat = telatNih;
-                                localData[r].dates[d].jt = jtString;
-                                serverData[r].dates[d] = localData[r].dates[d];
-                                
-                                let sisaBaru = localData[r].dates[d].sisaNyata !== undefined ? localData[r].dates[d].sisaNyata : localData[r].dates[d].tagihan;
-                                serverData[r].total += sisaBaru;
-                                if (telatNih) serverData[r].totalTelat += sisaBaru;
-                                else serverData[r].totalSehat += sisaBaru;
-                            }
-                        }
-                    }
-                }
-
-                // Update UI PWA DENGAN PENANGKAP ERROR KALO TETEP MUNTUH
-                dataPiutangLokal = serverData;
-                let strBaru = JSON.stringify(serverData);
-                try {
-                    localStorage.setItem('piutang_ptcbl_cache', strBaru);
-                } catch(e) {
-                    console.log("Memory Full. Menghapus Cache Lama...");
-                    localStorage.removeItem('rekap_cbl_2026_1');
-                    localStorage.removeItem('rekap_cbl_2026_2');
-                    localStorage.removeItem('rekap_cbl_2026_3');
-                    localStorage.removeItem('rekap_cbl_2026_4');
-                    localStorage.removeItem('rekap_cbl_2026_5');
-                    localStorage.removeItem('rekap_cbl_2026_6');
-                    localStorage.setItem('piutang_ptcbl_cache', strBaru); // Coba paksa lagi
-                }
+                document.getElementById('info-cache').innerHTML = `<span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">cloud_done</span> Data Supabase: ditarik ${waktuSekarang}`;
+                document.getElementById('info-cache').style.color = "#8AA624";
                 
-                renderListPiutang();
-
-            }).catch(err => {
+                terapkanFilter(); 
+            })
+            .catch(e => {
                 document.getElementById('rekap-hasil').innerHTML = `<div style="color:red; text-align:center;">Gagal memuat: ${e.message}</div>`;
-                document.getElementById('info-cache').innerText = "Gagal menyinkronkan data."; 
-                document.getElementById('info-cache').style.color = "red";
+                document.getElementById('info-cache').innerText = "Gagal menyinkronkan data."; document.getElementById('info-cache').style.color = "red";
             });
         }
 
@@ -4998,7 +4808,6 @@ async function prosesAntreanBackground() {
                     let catatanLengkap = String(row.catatan || "").toLowerCase();
                     let cKat = "Penjualan";
 
-                    // 🔥 LOGIKA KATEGORISASI BARU YANG LEBIH CERDAS
                     if (String(row.status).toLowerCase().includes("masuk")) {
                         if (catatanLengkap.includes("gudang") || namaRelasi.includes("mutasi")) cKat = "Mutasi";
                         else cKat = "Masuk";
@@ -5466,299 +5275,254 @@ async function prosesAntreanBackground() {
 
         function tarikDataPiutang(forceSync = false) {
             let cached = localStorage.getItem('piutang_ptcbl_cache');
-            if (cached) {
+            if (cached && !forceSync) {
                 dataPiutangLokal = JSON.parse(cached);
-                for (let r in dataPiutangLokal) {
-                    for (let d in dataPiutangLokal[r].dates) {
-                        dataPiutangLokal[r].dates[d].isLokal = false;
-                    }
-                }
                 renderListPiutang();
-            }
-
-            if (!forceSync && cached) {
                 return;
             }
 
-            if (!cached || forceSync) {
-                let btn = document.getElementById('btn-sync-piutang');
-                if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px; animation: spinMuter 1s linear infinite;">sync</span>`;
-                document.getElementById('piutang-loader').classList.remove('hidden');
+            let btn = document.getElementById('btn-sync-piutang');
+            if (btn) btn.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:18px;">sync</span>`;
+            document.getElementById('piutang-loader').classList.remove('hidden');
+
+            if (!navigator.onLine) {
+                if (!cached) alert("Wajib online untuk tarik data pertama kali!");
+                return;
             }
 
-            if (!navigator.onLine) return;
-            
-            // 🚀 TEMBAK KE KACAMATA PIUTANG SUPABASE (TANPA BATAS)
-            fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?select=*`)
+            // 🚀 TARIK DARI VIEW REKAP PIUTANG (SUPER RINGAN, CUMA NAMA & SALDO)
+            fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_rekap_piutang?sisa_piutang=neq.0&select=*`)
             .then(data => {
                 document.getElementById('piutang-loader').classList.add('hidden');
-                let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
+                if (data.error) throw new Error(data.message);
 
-                if (data.error || data.message) {
-                    alert("Supabase Error: " + (data.message || data.error));
-                    return;
-                }
-                if (!Array.isArray(data)) return;
-
-                // 🛠️ Menerjemahkan data Supabase & MENJALANKAN FIFO SMART SWEEP
                 let serverData = {};
-                let hariIni = new Date();
-                hariIni.setHours(0, 0, 0, 0);
+                data.sort((a, b) => b.sisa_piutang - a.sisa_piutang); // Urutkan dari hutang terbesar
 
-                let rawByRelasi = {};
+                data.forEach(d => {
+                    let rLower = String(d.relasi).toLowerCase();
+                    // Usir pemakaian internal & golongan sapi dari piutang
+                    if (rLower.includes('kandang') || rLower.includes('spn') || rLower.includes('rph') || rLower.includes('kapalang') || rLower.includes('dewasa') || rLower.includes('jantan') || rLower.includes('pedet') || rLower.includes('kerbau') || rLower.includes('bunting') || rLower.includes('bx') || rLower.includes('domba') || rLower.includes('darbun') || rLower.includes('laktasi')) return;
 
-                data.forEach(row => {
-                    let r = String(row.relasi || "").trim();
-                    if (!r || r === "-") return;
+                    serverData[d.relasi] = {
+                        total_sisa: parseFloat(d.sisa_piutang),
+                        isLoaded: false, // Penanda rincian belum disedot
+                        dates: {},
+                        riwayat: []
+                    };
+                });
 
-                    let rLower = r.toLowerCase();
-                    // FILTER SAKTI: Usir relasi internal, gudang, dan SEMUA nama kelompok sapi dari Piutang!
-                    if (rLower.includes('rd') || rLower.includes('rl') || 
-                        rLower.includes('spn') || rLower.includes('rph') || rLower.includes('cibulakan') || 
-                        rLower.includes('kandang') || rLower.includes('kapalang') || rLower.includes('dewasa') || 
-                        rLower.includes('jantan') || rLower.includes('pedet') || rLower.includes('kerbau') || 
-                        rLower.includes('darbun') || rLower.includes('laktasi') || rLower.includes('bunting')) {
-                        return; 
-                    }
+                dataPiutangLokal = serverData;
+                localStorage.setItem('piutang_ptcbl_cache', JSON.stringify(serverData));
+                renderListPiutang();
+            }).catch(e => {
+                document.getElementById('piutang-loader').classList.add('hidden');
+                if (btn) btn.innerHTML = `<span class="material-symbols-outlined">sync</span>`;
+                alert("Gagal memuat rekap piutang: " + e.message);
+            });
+        }
+
+        // MESIN KEDUA: PENYEDOT RINCIAN (KHUSUS NAMA YANG DIKLIK & HARGA AKURAT + RETUR)
+        function bukaDetailPiutang(namaRelasi, safeClass, totalSisa) {
+            let container = document.getElementById(`det_piutang_${safeClass}`);
+            let content = document.getElementById(`content_det_${safeClass}`);
+            let loader = document.getElementById(`loader_det_${safeClass}`);
+            
+            // Toggle tutup/buka
+            if (!container.classList.contains('hidden')) { container.classList.add('hidden'); return; }
+            container.classList.remove('hidden');
+
+            // Kalau datanya sudah ada di memori HP, langsung buka aja!
+            if (dataPiutangLokal[namaRelasi].isLoaded) {
+                loader.classList.add('hidden'); content.classList.remove('hidden'); return;
+            }
+
+            if (!navigator.onLine) { alert("Wajib online untuk melihat rincian pertama kali!"); container.classList.add('hidden'); return; }
+
+            // 🚀 SEDOT RAW DATA KHUSUS 1 ORANG INI SAJA (BYPASS VIEW = HARGA 100% AKURAT)
+            Promise.all([
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/transaksi_pakan?relasi=eq.${encodeURIComponent(namaRelasi)}&select=*`),
+                fetchSupabaseAll(`${SUPA_URL}/rest/v1/cashflow?relasi=eq.${encodeURIComponent(namaRelasi)}&select=*`)
+            ])
+            .then(([pakanData, cfData]) => {
+                let rawTagihan = []; let rawBayar = [];
+
+                // 1. OLAH PAKAN MENTAH (TERMASUK RETUR JADI MINUS)
+                pakanData.forEach(row => {
+                    let statusLower = String(row.status).toLowerCase();
+                    let isRetur = statusLower.includes('masuk');
+                    let isKeluar = statusLower.includes('keluar');
+                    if (!isKeluar && !isRetur) return;
+
+                    let qty = parseFloat(row.qty) || 0;
+                    let hrg = parseFloat(row.harga_satuan) || 0;
+                    let nominalAsli = qty * hrg; 
                     
-                    if (!rawByRelasi[r]) {
-                        rawByRelasi[r] = { tagihan: [], bayar: [] }; // Alamat dibuang dari piutang_cache agar hemat memori
+                    // KONSEP RETUR: KALAU MASUK, JADIKAN NOMINAL NEGATIF
+                    if (isRetur) nominalAsli = -Math.abs(nominalAsli);
+
+                    rawTagihan.push({ tgl: row.tanggal, pakan: isRetur ? `[RETUR] ${row.pakan}` : row.pakan, qty: isRetur ? -qty : qty, satuan: row.satuan || 'Kg', nominal: nominalAsli, terbayar: 0 });
+                });
+
+                // 2. OLAH CASHFLOW MENTAH
+                cfData.forEach(row => {
+                    let isBayar = String(row.jenis).toLowerCase().includes("masuk") && (String(row.kategori).toLowerCase().includes("bayar") || row.kategori === "Cash In");
+                    if (!isBayar) return;
+                    let nominalAsliCF = parseFloat(row.nominal) || 0;
+                    rawBayar.push({ tgl: row.tanggal, nominal: nominalAsliCF, sisaBayar: nominalAsliCF, detailPotongan: [] });
+                });
+
+                // 3. MESIN FIFO SMART SWEEP KHUSUS ORANG INI
+                let listTagihan = rawTagihan.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+                let listBayar = rawBayar.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+                let groupedNota = {};
+                listTagihan.forEach(item => {
+                    let tgl = item.tgl || "2000-01-01";
+                    if (!groupedNota[tgl]) groupedNota[tgl] = { tgl: tgl, totalTagihan: 0, terbayar: 0, items: [] };
+                    groupedNota[tgl].totalTagihan += item.nominal;
+                    groupedNota[tgl].items.push({pakan: item.pakan, qty: item.qty, nominal: item.nominal, satuan: item.satuan});
+                });
+
+                let arrNota = Object.values(groupedNota).sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
+                let indexBayar = 0;
+                for (let i = 0; i < arrNota.length; i++) {
+                    let nota = arrNota[i]; let sisaHutangNota = nota.totalTagihan - nota.terbayar;
+                    while (sisaHutangNota > 0 && indexBayar < listBayar.length) {
+                        let uangMasuk = listBayar[indexBayar];
+                        if (uangMasuk.sisaBayar <= 0) { indexBayar++; continue; }
+                        let jumlahDipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
+                        if (jumlahDipotong > 0) { uangMasuk.detailPotongan.push({ tglNota: nota.tgl, hutangSblm: sisaHutangNota, jumlah: jumlahDipotong, sisaAkhir: sisaHutangNota - jumlahDipotong }); }
+                        nota.terbayar += jumlahDipotong; uangMasuk.sisaBayar -= jumlahDipotong; sisaHutangNota -= jumlahDipotong;
+                        if (uangMasuk.sisaBayar <= 0) indexBayar++;
                     }
+                }
 
-                    let nominal = parseFloat(row.nominal) || parseFloat(row.tagihan) || parseFloat(row.debet) || ((parseFloat(row.qty)||0) * (parseFloat(row.harga_satuan)||0)) || 0;
+                // 4. SUSUN UI HTML RINCIAN
+                let nf = new Intl.NumberFormat('id-ID'); let hariIni = new Date(); hariIni.setHours(0,0,0,0);
+                let htmlItems = ""; let totalSisaKalkulasi = 0;
 
-                    if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
-                        // DIET: Buang bukti_url dan array detailPotongan kosong
-                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [] });
-                    } else {
-                        // DIET: Hanya simpan info esensial
-                        rawByRelasi[r].tagihan.push({
-                            tgl: row.tanggal,
-                            pakan: row.pakan_kategori || 'Pakan',
-                            qty: parseFloat(row.qty) || 0,
-                            nominal: nominal,
-                            terbayar: 0
-                        });
+                arrNota.forEach(nota => {
+                    let sisaNyata = nota.totalTagihan - nota.terbayar;
+                    // HANYA RENDER JIKA SISA HUTANG TIDAK 0 (YANG LUNAS HILANG) ATAU TOTALNYA MINUS (RETUR MURNI)
+                    if (Math.round(sisaNyata) !== 0) {
+                        let parts = nota.tgl.split('-');
+                        let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : nota.tgl;
+                        let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
+                        dTrx.setHours(0, 0, 0, 0); let jtDate = new Date(dTrx); jtDate.setDate(jtDate.getDate() + 15);
+                        let telatNih = hariIni > jtDate; let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear().toString().substring(2);
+
+                        dataPiutangLokal[namaRelasi].dates[tglFormated] = { isLokal: false, tgl: tglFormated, tagihan: nota.totalTagihan, dp: nota.terbayar, sisaNyata: sisaNyata, jt: jtString, isTelat: telatNih, items: nota.items };
+                        totalSisaKalkulasi += sisaNyata;
+
+                        let rincianHtml = nota.items.map(it => {
+                            let warnaNominal = it.nominal < 0 ? "#8AA624" : "#333";
+                            return `<div style="display:flex; justify-content:space-between; font-size:11px; color:#555; padding:4px 0; border-bottom:1px solid #f0f0f0;">
+                                      <span>- ${it.pakan} (${it.qty} ${it.satuan})</span>
+                                      <span style="font-weight:bold; color:${warnaNominal};">Rp ${nf.format(it.nominal)}</span>
+                                  </div>`;
+                        }).join('');
+
+                        let lampu = telatNih ? `<span class="material-symbols-outlined" style="font-size:16px; color:#c62828; vertical-align:middle;">error</span>` : `<span class="material-symbols-outlined" style="font-size:16px; color:#FEA405; vertical-align:middle;">schedule</span>`;
+                        let warnaJT = telatNih ? "#c62828" : "#888";
+                        let valStr = encodeURIComponent(JSON.stringify(dataPiutangLokal[namaRelasi].dates[tglFormated]));
+                        let infoKanan = `<div style="text-align:right;">
+                                            <div style="font-weight:bold; color:#888; font-size:11px; text-decoration:line-through;">Rp ${nf.format(nota.totalTagihan)}</div>
+                                            <div style="font-size:9px; color:#FEA405; font-weight:bold;">Ter-DP: Rp ${nf.format(nota.terbayar)}</div>
+                                            <div style="font-weight:bold; color:#333; font-size:13px; margin-top:2px;">Rp ${nf.format(sisaNyata)}</div>
+                                         </div>`;
+                        if (nota.terbayar === 0) infoKanan = `<div style="font-weight:bold; color:#333; text-align:right; font-size:13px;">Rp ${nf.format(sisaNyata)}</div>`;
+
+                        htmlItems += `<div style="padding:10px 0; border-bottom:1px solid #eee;">
+                          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                              <div style="display:flex; align-items:flex-start; gap:8px;">
+                                  <input type="checkbox" id="chk_${safeClass}_${tglFormated.replace(/\//g,'')}" class="chk-inv-${safeClass}" value='${valStr}' data-nominal="${sisaNyata}" style="width:20px; height:20px; margin-top:2px;" checked onchange="hitungPreviewSubtotal('${safeClass}')">
+                                  <div style="cursor:pointer; line-height:1.2;" onclick="document.getElementById('rincian_${safeClass}_${tglFormated.replace(/\//g,'')}').classList.toggle('hidden')">
+                                      <b style="color:#8AA624; font-size:13px;">${lampu} ${tglFormated}</b><br>
+                                      <span style="font-size:10px; font-weight:bold; color:${warnaJT};">${jtString ? 'JT: '+jtString : ''}</span><br>
+                                      <span style="font-size:10px; color:#888;">(Lihat rincian ▾)</span>
+                                  </div>
+                              </div>
+                              ${infoKanan}
+                          </div>
+                          <div id="rincian_${safeClass}_${tglFormated.replace(/\//g,'')}" class="hidden" style="margin-top:8px; border-top:1px dashed #DBE4C9; padding-top:8px; padding-left:28px;">${rincianHtml}</div>
+                      </div>`;
                     }
                 });
 
-                // 2. MESIN SMART SWEEP (FIFO)
-                for (let r in rawByRelasi) {
-                    // 🔥 TAMBAHAN: Laci 'riwayat' dihidupkan kembali!
-                    serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: rawByRelasi[r].alamat, dates: {}, riwayat: [] };
+                let sisaDeposit = 0;
+                while(indexBayar < listBayar.length) { sisaDeposit += listBayar[indexBayar].sisaBayar; indexBayar++; }
+                if (sisaDeposit > 0) {
+                    let tglDepo = ("0" + hariIni.getDate()).slice(-2) + "/" + ("0" + (hariIni.getMonth() + 1)).slice(-2) + "/" + hariIni.getFullYear();
+                    dataPiutangLokal[namaRelasi].dates["DEPO-"+tglDepo] = { isLokal: false, tgl: tglDepo, tagihan: 0, dp: sisaDeposit, sisaNyata: -sisaDeposit, jt: "", isTelat: false, items: [{ pakan: "Deposit / Uang Lebih", qty: 0, nominal: -sisaDeposit, satuan: "-" }] };
+                    totalSisaKalkulasi -= sisaDeposit;
+                }
 
-                    let listTagihan = rawByRelasi[r].tagihan.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
-                    let listBayar = rawByRelasi[r].bayar.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
-
-                    // A. Kumpulkan item pakan ke dalam nota per tanggal
-                    let groupedNota = {};
-                    listTagihan.forEach(item => {
-                        let tgl = item.tgl || "2000-01-01";
-                        if (!groupedNota[tgl]) {
-                            groupedNota[tgl] = { tgl: tgl, totalTagihan: 0, terbayar: 0, items: [] };
-                        }
-                        groupedNota[tgl].totalTagihan += item.nominal;
-                        groupedNota[tgl].items.push(item);
-                    });
-
-                    let arrNota = Object.values(groupedNota).sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
-
-                    // B. Eksekusi Potong Saldo Otomatis & Catat Jejaknya
-                    let indexBayar = 0;
-                    for (let i = 0; i < arrNota.length; i++) {
-                        let nota = arrNota[i];
-                        let sisaHutangNota = nota.totalTagihan - nota.terbayar;
-
-                        while (sisaHutangNota > 0 && indexBayar < listBayar.length) {
-                            let uangMasuk = listBayar[indexBayar];
-                            if (uangMasuk.sisaBayar <= 0) {
-                                indexBayar++;
-                                continue;
-                            }
-
-                            let jumlahDipotong = Math.min(sisaHutangNota, uangMasuk.sisaBayar);
-                            
-                            // 🔥 DETEKTIF BEKERJA: CATAT JEJAK MATEMATIKA
-                            if (jumlahDipotong > 0) {
-                                let sisaSetelahDipotong = sisaHutangNota - jumlahDipotong;
-                                let sisaSebelumDipotong = sisaHutangNota; // Hutang sblm disiram uang ini
-                                
-                                uangMasuk.detailPotongan.push({
-                                    tglNota: nota.tgl,
-                                    hutangSblm: sisaSebelumDipotong,
-                                    jumlah: jumlahDipotong,
-                                    sisaAkhir: sisaSetelahDipotong
-                                });
-                            }
-
-                            nota.terbayar += jumlahDipotong;
-                            uangMasuk.sisaBayar -= jumlahDipotong;
-                            sisaHutangNota -= jumlahDipotong;
-
-                            if (uangMasuk.sisaBayar <= 0) indexBayar++;
-                        }
-                    }
-
-                    // C. Masukkan Nota yang MASIH NGUTANG ke tampilan PWA
-                    let hariIni = new Date();
-                    hariIni.setHours(0,0,0,0);
-                    
-                    arrNota.forEach(nota => {
-                        let sisaNyata = nota.totalTagihan - nota.terbayar;
-
-                        if (sisaNyata > 0) {
-                            let parts = nota.tgl.split('-');
-                            let tglFormated = parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : nota.tgl;
-
-                            let dTrx = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date();
-                            dTrx.setHours(0, 0, 0, 0);
-                            let jtDate = new Date(dTrx);
-                            jtDate.setDate(jtDate.getDate() + 15);
-                            
-                            let telatNih = hariIni > jtDate;
-                            let jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear();
-
-                            serverData[r].dates[tglFormated] = {
-                                isLokal: false, tgl: tglFormated, tagihan: nota.totalTagihan, dp: nota.terbayar, sisaNyata: sisaNyata, jt: jtString, isTelat: telatNih, items: nota.items
-                            };
-
-                            serverData[r].total += sisaNyata;
-                            if (telatNih) serverData[r].totalTelat += sisaNyata;
-                            else serverData[r].totalSehat += sisaNyata;
-                        }
-                    });
-
-                    // D. Cek apakah ada Uang Lebih (Deposit / Overpay)
-                    let sisaDeposit = 0;
-                    while(indexBayar < listBayar.length) {
-                        sisaDeposit += listBayar[indexBayar].sisaBayar;
-                        indexBayar++;
-                    }
-
-                    if (sisaDeposit > 0) {
-                        let tglDepo = ("0" + hariIni.getDate()).slice(-2) + "/" + ("0" + (hariIni.getMonth() + 1)).slice(-2) + "/" + hariIni.getFullYear();
-                        serverData[r].dates["DEPO-"+tglDepo] = {
-                            isLokal: false, tgl: tglDepo, tagihan: 0, dp: sisaDeposit, sisaNyata: -sisaDeposit, jt: "", isTelat: false,
-                            items: [{ pakan: "Deposit / Uang Lebih", qty: 0, satuan: "-", nominal: -sisaDeposit }]
-                        };
-                        serverData[r].total -= sisaDeposit;
-                    }
-
-                    // E. 📝 BUNGKUS JEJAK RIWAYAT PEMBAYARAN KE UI (AMBIL 10 TERAKHIR)
-                    let nf = new Intl.NumberFormat('id-ID');
-                    let riwayatTerbalik = [...listBayar].reverse().slice(0, 10);
-                    
-                    riwayatTerbalik.forEach(byr => {
-                        let bParts = byr.tgl.split('-');
-                        let bTglStr = bParts.length === 3 ? `${bParts[2]}/${bParts[1]}/${bParts[0].substring(2)}` : byr.tgl;
-                        
+                // 5. RIWAYAT BAYAR TERAKHIR
+                let riwayatTerbalik = [...listBayar].reverse().slice(0, 5);
+                let riwayatHtml = "";
+                if (riwayatTerbalik.length > 0) {
+                    riwayatHtml = `<div style="margin-top:15px; border-top:1px dashed #DBE4C9; padding-top:10px; margin-bottom: 10px;">
+                      <strong style="font-size:12px; color:#8AA624; display:flex; align-items:center; gap:5px; margin-bottom:8px;"><span class="material-symbols-outlined" style="font-size:16px;">history</span> Riwayat Uang Masuk</strong>
+                      <div style="max-height:200px; overflow-y:auto;">`;
+                    riwayatTerbalik.forEach((byr, idxRw) => {
+                        let bParts = byr.tgl.split('-'); let bTglStr = bParts.length === 3 ? `${bParts[2]}/${bParts[1]}/${bParts[0].substring(2)}` : byr.tgl;
                         let ketText = ``;
                         if (byr.detailPotongan.length > 0) {
-                            ketText += `<i style="color:#888;">Uang ini dipakai untuk memotong:</i><br>`;
+                            ketText += `Potong:<br>`;
                             byr.detailPotongan.forEach(pot => {
-                                let nParts = pot.tglNota.split('-');
-                                let nTglStr = nParts.length === 3 ? `${nParts[2]}/${nParts[1]}/${nParts[0]}` : pot.tglNota;
-                                
-                                // 🔥 FORMAT MATEMATIKA SESUAI REQUEST
-                                let sisaHtml = pot.sisaAkhir <= 0 
-                                    ? `<b style="color:#8AA624;">Rp 0 (LUNAS)</b>` 
-                                    : `<b style="color:#c62828;">Rp ${nf.format(pot.sisaAkhir)}</b>`;
-                                    
-                                ketText += `<span style="color:#555; display:inline-block; margin-top:2px;">• Nota tgl ${nTglStr} : (Rp ${nf.format(pot.hutangSblm)}) - (Masuk Rp ${nf.format(pot.jumlah)}) = Sisa ${sisaHtml}</span><br>`;
+                                let nParts = pot.tglNota.split('-'); let nTglStr = nParts.length === 3 ? `${nParts[2]}/${nParts[1]}/${nParts[0].substring(2)}` : pot.tglNota;
+                                ketText += `• ${nTglStr}: (Rp ${nf.format(pot.hutangSblm)}) - Rp ${nf.format(pot.jumlah)} = Sisa Rp ${nf.format(pot.sisaAkhir)}<br>`;
                             });
                         }
-                        
-                        // Cek apakah ada sisa uang yang belum kepakai
-                        if (byr.sisaBayar > 0) {
-                            ketText += `<span style="color:#8AA624; font-weight:bold; display:inline-block; margin-top:4px;">• Sisa Uang / Deposit : Rp ${nf.format(byr.sisaBayar)}</span><br>`;
-                        }
+                        if (byr.sisaBayar > 0) ketText += `Sisa DP: Rp ${nf.format(byr.sisaBayar)}<br>`;
+                        if (ketText === '') ketText = `<i>Belum digunakan.</i>`;
 
-                        if (ketText === '') {
-                            ketText = `<i style="color:#888;">Belum digunakan untuk memotong nota manapun.</i>`;
-                        }
-
-                        let linkBukti = (byr.bukti_url && byr.bukti_url.length > 5 && byr.bukti_url !== "-") ? `<a href="${byr.bukti_url}" target="_blank" style="margin-left:5px; color:#4A90E2; text-decoration:none;"><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">receipt_long</span> Bukti</a>` : "";
-                        serverData[r].riwayat.push({
-                            tgl: bTglStr,
-                            nominal: byr.nominal,
-                            ket: ketText,
-                            link: linkBukti
-                        });
+                        riwayatHtml += `<div style="background:#f8fdf4; border:1px solid #DBE4C9; border-radius:6px; padding:8px; margin-bottom:6px; cursor:pointer;" onclick="document.getElementById('det_rw_${safeClass}_${idxRw}').classList.toggle('hidden')">
+                          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:4px;">
+                              <div><span style="font-weight:bold; font-size:11px;">Tgl Bayar: ${bTglStr}</span></div>
+                              <span style="color:#8AA624; font-weight:bold; font-size:11px;">+ Rp ${nf.format(byr.nominal)}</span>
+                          </div>
+                          <div id="det_rw_${safeClass}_${idxRw}" class="hidden" style="margin-top:6px; font-size:10px; color:#555; line-height:1.4;">${ketText}</div>
+                      </div>`;
                     });
+                    riwayatHtml += `</div></div>`;
                 }
 
-                // --- PEMBERSIH GHOST CACHE PIUTANG ---
-                let antrian = JSON.parse(localStorage.getItem('antrian_pakan') || "[]");
-                if (antrian.length === 0) {
-                    let piutangCache = JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}");
-                    for (let k in piutangCache) {
-                        for (let d in piutangCache[k].dates) {
-                            piutangCache[k].dates[d].isLokal = false;
-                        }
-                    }
-                    localStorage.setItem('piutang_ptcbl_cache', JSON.stringify(piutangCache));
+                // 6. RENDER TOMBOL & KUMPULAN HTML
+                let actionButtons = "";
+                if (totalSisaKalkulasi > 0 && htmlItems !== "") {
+                    actionButtons = `
+                    <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:11px; font-weight:bold;">
+                        <span style="color:#8AA624; cursor:pointer; padding:5px 8px; border:1px solid #8AA624; border-radius:4px;" onclick="toggleSelectSemua('${safeClass}', true)"><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">check_box</span> Pilih Semua</span>
+                        <span style="color:#FEA405; cursor:pointer; padding:5px 8px; border:1px solid #FEA405; border-radius:4px;" onclick="toggleSelectSemua('${safeClass}', false)"><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">check_box_outline_blank</span> Kosongkan</span>
+                    </div>
+                    <div style="max-height: 250px; overflow-y: auto; padding-right:5px; margin-bottom:10px;">${htmlItems}</div>
+                    <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:13px; margin-bottom:10px; border-top:1px solid #DBE4C9; padding-top:10px;">
+                        <span>Total Pilihan:</span><span id="tot_pilihan_${safeClass}" style="color:#8AA624;">Rp ${nf.format(totalSisaKalkulasi)}</span>
+                    </div>`;
+
+                    if (!window.isCustomerPortal) {
+                        actionButtons += `
+                        ${riwayatHtml}
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn-submit" onclick="siapkanInvoice('${namaRelasi.replace(/'/g, "\\'")}')" style="margin-top:5px; font-size:13px; padding:10px; background:#8AA624; flex:3;"><span class="material-symbols-outlined" style="font-size:16px;">print</span> Cetak Invoice</button>
+                        </div>`;
+                    } else { actionButtons += riwayatHtml; }
+                } else {
+                    actionButtons = `
+                    ${riwayatHtml}
+                    <div style="text-align:center; padding:15px; background:#f8fdf4; border:1px dashed #8AA624; border-radius:8px; color:#8AA624; font-weight:bold;">Konsumen ini sedang tidak memiliki tunggakan (Lunas/Deposit).</div>`;
                 }
 
-                // Sisipkan data yang masih antre di HP (Optimistic UI)
-                let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
-                let hasPendingPiutang = pendingMaster.some(x => x.status === "Keluar" && x.relasi && !String(x.relasi).toLowerCase().includes("kandang"));
-                
-                let localData = hasPendingPiutang ? JSON.parse(localStorage.getItem('piutang_ptcbl_cache') || "{}") : {};
+                content.innerHTML = actionButtons;
+                dataPiutangLokal[namaRelasi].isLoaded = true;
+                localStorage.setItem('piutang_ptcbl_cache', JSON.stringify(dataPiutangLokal));
 
-                for (let r in localData) {
-                    for (let d in localData[r].dates) {
-                        if (localData[r].dates[d].isLokal) {
-                            let parts = String(d).split('/');
-                            let normalizedDate = d;
-                            let telatNih = false;
-                            let jtString = "";
+                loader.classList.add('hidden');
+                content.classList.remove('hidden');
 
-                            if (parts.length === 3) {
-                                let fullYear = parts[2].length === 2 ? "20" + parts[2] : parts[2];
-                                normalizedDate = `${parts[0]}/${parts[1]}/${fullYear}`;
-                                
-                                let dTrx = new Date(fullYear, parts[1] - 1, parts[0]);
-                                dTrx.setHours(0, 0, 0, 0);
-                                let jtDate = new Date(dTrx);
-                                jtDate.setDate(jtDate.getDate() + 15);
-                                
-                                telatNih = hariIni > jtDate;
-                                jtString = ("0" + jtDate.getDate()).slice(-2) + "/" + ("0" + (jtDate.getMonth() + 1)).slice(-2) + "/" + jtDate.getFullYear();
-                            }
-
-                            if (!serverData[r]) serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: localData[r].alamat, dates: {} };
-                            
-                            if (serverData[r].dates[normalizedDate] || serverData[r].dates[d]) {
-                                continue; 
-                            } else {
-                                localData[r].dates[d].isTelat = telatNih;
-                                localData[r].dates[d].jt = jtString;
-                                serverData[r].dates[d] = localData[r].dates[d];
-                                
-                                let sisaBaru = localData[r].dates[d].sisaNyata !== undefined ? localData[r].dates[d].sisaNyata : localData[r].dates[d].tagihan;
-                                serverData[r].total += sisaBaru;
-                                if (telatNih) serverData[r].totalTelat += sisaBaru;
-                                else serverData[r].totalSehat += sisaBaru;
-                            }
-                        }
-                    }
-                }
-
-                // Update UI PWA
-                let strBaru = JSON.stringify(serverData);
-                dataPiutangLokal = serverData;
-                localStorage.setItem('piutang_ptcbl_cache', strBaru);
-                
-                renderListPiutang();
-
-            }).catch(err => {
-                document.getElementById('piutang-loader').classList.add('hidden');
-                let btn = document.getElementById('btn-sync-piutang');
-                if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
-                console.log("Gagal sync piutang:", err);
-                alert("Kesalahan Data: " + err.message);
-            });
+            }).catch(e => { loader.innerText = "Gagal memuat rincian: " + e.message; });
         }
 
         function filterPiutang() {
@@ -5773,170 +5537,32 @@ async function prosesAntreanBackground() {
 
         function renderListPiutang() {
             let nf = new Intl.NumberFormat('id-ID'); let html = "";
-            let sortedKeys = Object.keys(dataPiutangLokal).sort((a, b) => {
-                let telatA = dataPiutangLokal[a].totalTelat > 0 ? 1 : 0;
-                let telatB = dataPiutangLokal[b].totalTelat > 0 ? 1 : 0;
-                if (telatA !== telatB) return telatB - telatA;
-                return dataPiutangLokal[b].total - dataPiutangLokal[a].total;
-            });
-
-            for (let i = 0; i < sortedKeys.length; i++) {
-                let namaKey = sortedKeys[i];
+            let keys = Object.keys(dataPiutangLokal);
+            
+            keys.forEach(namaKey => {
                 let d = dataPiutangLokal[namaKey];
                 let safeClass = namaKey.replace(/[\s\W]/g, '');
-                let dateKeys = Object.keys(d.dates);
-
-                let htmlItems = dateKeys.map((dateStr, idx) => {
-                    let dateObj = d.dates[dateStr];
-                    let rincianHtml = dateObj.items.map(it => {
-                        let safeSatuan = it.satuan || (it.pakan.toLowerCase().includes('ongkir') ? 'Rit' : 'Kg');
-                        return `<div style="display:flex; justify-content:space-between; font-size:11px; color:#555; padding:4px 0; border-bottom:1px solid #f0f0f0;">
-                                  <span>- ${it.pakan} (${it.qty} ${safeSatuan})</span>
-                                  <span style="font-weight:bold;">Rp ${nf.format(it.nominal)}</span>
-                              </div>`;
-                    }).join('');
-
-                    let iconMuter = dateObj.isLokal ? 'schedule' : 'check_circle';
-                    let iconWarna = dateObj.isLokal ? '#FEA405' : '#8AA624';
-                    let lampu = `<span class="material-symbols-outlined" style="font-size:16px; color:${iconWarna}; vertical-align:middle;">${iconMuter}</span>`;
-
-                    let tglJTArray = dateObj.jt ? dateObj.jt.split('/') : [];
-                    let teksJT = ""; let warnaJT = "#888";
-
-                    if (tglJTArray.length === 3) {
-                        let tglJTObj = new Date(tglJTArray[2], tglJTArray[1] - 1, tglJTArray[0]);
-                        let hariIni = new Date(); hariIni.setHours(0, 0, 0, 0); tglJTObj.setHours(0, 0, 0, 0);
-                        let selisihHari = Math.ceil((tglJTObj.getTime() - hariIni.getTime()) / (1000 * 60 * 60 * 24));
-                        if (selisihHari > 0) { teksJT = `<span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">schedule</span> H-${selisihHari}`; warnaJT = "#FEA405"; }
-                        else if (selisihHari === 0) { teksJT = `<span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">schedule</span> Hari Ini`; warnaJT = "#FEA405"; }
-                        else { teksJT = `<span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">error</span> Terlambat ${Math.abs(selisihHari)} Hari`; warnaJT = "#c62828"; }
-                    }
-
-                    let displayNominalTagihan = dateObj.sisaNyata !== undefined ? dateObj.sisaNyata : dateObj.tagihan;
-                    let isOlderThan30Days = false;
-                    let parts = dateObj.tgl.split('/');
-                    if (parts.length === 3) {
-                        let y = parseInt(parts[2]); if (y < 100) y += 2000;
-                        let dTrx = new Date(y, parseInt(parts[1]) - 1, parseInt(parts[0]));
-                        dTrx.setHours(0, 0, 0, 0);
-                        let hariIni = new Date(); hariIni.setHours(0, 0, 0, 0);
-                        isOlderThan30Days = (hariIni.getTime() - dTrx.getTime()) > (30 * 24 * 60 * 60 * 1000);
-                    }
-
-                    let passData = { tgl: dateObj.tgl, items: dateObj.items, dp: dateObj.dp || 0, tagihan: dateObj.tagihan || 0, sisaNyata: displayNominalTagihan };
-                    let valStr = encodeURIComponent(JSON.stringify(passData));
-
-                    let lockIcon = (dateObj.dp > 0 && isOlderThan30Days) ? `<span class="material-symbols-outlined" style="font-size:14px; color:#c62828; vertical-align:middle; margin-left:5px;" title="Bon Lama Ter-DP">lock</span>` : '';
-                    let bgCard = (dateObj.dp > 0 && isOlderThan30Days) ? 'background:#FFFFF0; opacity:0.95;' : '';
-
-                    let infoKanan = "";
-                    if (dateObj.dp > 0 || displayNominalTagihan <= 0) {
-                        let teksSisaLunas = displayNominalTagihan <= 0 ?
-                            `<div style="font-size:11px; color:#8AA624; font-weight:bold; margin-top:2px;">LUNAS</div>` :
-                            `<div style="font-weight:bold; color:#333; font-size:13px; margin-top:2px;">Rp ${nf.format(displayNominalTagihan)}</div>`;
-
-                        infoKanan = `
-                      <div style="text-align:right;">
-                          <div style="font-weight:bold; color:#888; font-size:11px; text-decoration:line-through;">Rp ${nf.format(dateObj.tagihan)}</div>
-                          <div style="font-size:9px; color:#FEA405; font-weight:bold;">Ter-DP: Rp ${nf.format(dateObj.dp)}</div>
-                          ${teksSisaLunas}
-                      </div>`;
-                    } else {
-                        infoKanan = `<div style="font-weight:bold; color:#333; text-align:right; font-size:13px;">Rp ${nf.format(displayNominalTagihan)}</div>`;
-                    }
-
-                    return `<div style="padding:10px 0; border-bottom:1px solid #eee; ${bgCard}">
-                      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                          <div style="display:flex; align-items:flex-start; gap:8px;">
-                              <input type="checkbox" id="chk_${safeClass}_${idx}" class="chk-inv-${safeClass}" value='${valStr}' data-nominal="${displayNominalTagihan}" style="width:20px; height:20px; margin-top:2px;" checked onchange="hitungPreviewSubtotal('${safeClass}')">
-                              <div style="cursor:pointer; line-height:1.2;" onclick="document.getElementById('rincian_${safeClass}_${idx}').classList.toggle('hidden')">
-                                  <b style="color:#8AA624; font-size:13px;">${lampu} ${dateObj.tgl}${lockIcon}</b><br>
-                                  <span style="font-size:10px; font-weight:bold; color:${warnaJT};">${teksJT}</span><br>
-                                  <span style="font-size:10px; color:#888;">(Lihat rincian ▾)</span>
-                              </div>
-                          </div>
-                          ${infoKanan}
-                      </div>
-                      <div id="rincian_${safeClass}_${idx}" class="hidden" style="margin-top:8px; border-top:1px dashed #DBE4C9; padding-top:8px; padding-left:28px;">${rincianHtml}</div>
-                  </div>`;
-                }).join('');
-
-                let isDeposit = d.total < 0;
-                let warnaBorder = isDeposit ? "#8AA624" : (d.totalTelat > 0 ? "#c62828" : "#8AA624");
-                let teksStatus = "";
-
-                if (isDeposit) {
-                    teksStatus = `<div style="margin-top:4px;"><small style="color:#8AA624; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">account_balance_wallet</span> Deposit / Lebih Bayar</small></div>`;
-                } else {
-                    if (d.totalTelat > 0 && d.totalSehat > 0) teksStatus = `<div style="line-height:1.4; margin-top:4px;"><small style="color:#c62828; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">warning</span> Telat: Rp ${nf.format(d.totalTelat)}</small><br><small style="color:#8AA624; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">task_alt</span> Sehat: Rp ${nf.format(d.totalSehat)}</small></div>`;
-                    else if (d.totalTelat > 0) teksStatus = `<div style="margin-top:4px;"><small style="color:#c62828; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">warning</span> Telat: Rp ${nf.format(d.totalTelat)}</small></div>`;
-                    else teksStatus = `<div style="margin-top:4px;"><small style="color:#8AA624; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">task_alt</span> Sehat: Rp ${nf.format(d.totalSehat)}</small></div>`;
-                }
-
-                let displayTotal = isDeposit ? `- Rp ${nf.format(Math.abs(d.total))}` : `Rp ${nf.format(d.total)}`;
-
-                let riwayatHtml = "";
-                if (d.riwayat && d.riwayat.length > 0) {
-                    riwayatHtml = `<div style="margin-top:15px; border-top:1px dashed #DBE4C9; padding-top:10px; margin-bottom: 10px;">
-                      <strong style="font-size:12px; color:#8AA624; display:flex; align-items:center; gap:5px; margin-bottom:8px;"><span class="material-symbols-outlined" style="font-size:16px;">history</span> Riwayat Uang Masuk Terakhir</strong>
-                      <div style="max-height:200px; overflow-y:auto;">`;
-                    d.riwayat.forEach((rw, indexRiwayat) => {
-                        riwayatHtml += `<div style="background:#f8fdf4; border:1px solid #DBE4C9; border-radius:6px; padding:8px; margin-bottom:6px; cursor:pointer;" onclick="document.getElementById('det_rw_${safeClass}_${indexRiwayat}').classList.toggle('hidden')">
-                          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:4px;">
-                              <div>
-                                  <span style="font-weight:bold; font-size:11px;">Tgl Bayar: ${rw.tgl} ${rw.link}</span><br>
-                                  <span style="font-size:9px; color:#888; font-weight:normal;">Klik untuk lihat rincian ▾</span>
-                              </div>
-                              <span style="color:#8AA624; font-weight:bold; font-size:11px;">+ Rp ${nf.format(rw.nominal)}</span>
-                          </div>
-                          <div id="det_rw_${safeClass}_${indexRiwayat}" class="hidden" style="margin-top:6px; font-size:10px; color:#555; line-height:1.4;">${rw.ket}</div>
-                      </div>`;
-                    });
-                    riwayatHtml += `</div></div>`;
-                }
-
-                let btnReminder = "";
-                if (d.totalTelat > 0) {
-                    btnReminder = `<button class="btn-submit" onclick="prosesReminderWA('${namaKey.replace(/'/g, "\\'")}')" style="margin-top:5px; font-size:13px; padding:10px; background:#2196F3; flex:1;" title="Kirim Reminder WA"><span class="material-symbols-outlined" style="font-size:16px;">campaign</span></button>`;
-                }
-
-                // --- PEMISAH TAMPILAN ADMIN vs KONSUMEN ---
-                let actionButtons = "";
-                if (!window.isCustomerPortal) {
-                    // Munculkan Tombol Portal Jika Admin
-                    let btnPortal = `<button class="btn-submit" onclick="bagikanLinkPortal('${namaKey.replace(/'/g, "\\'")}')" style="margin-top:5px; font-size:13px; padding:10px; background:#9C27B0; flex:1;" title="Kirim Link Portal"><span class="material-symbols-outlined" style="font-size:16px;">link</span></button>`;
-
-                    actionButtons = `
-                      ${riwayatHtml}
-                      <div style="display:flex; gap:10px;">
-                          <button class="btn-submit" onclick="siapkanInvoice('${namaKey.replace(/'/g, "\\'")}')" style="margin-top:5px; font-size:13px; padding:10px; background:#8AA624; flex:3;"><span class="material-symbols-outlined" style="font-size:16px;">print</span> Invoice</button>
-                          ${btnReminder}
-                          ${btnPortal}
-                      </div>`;
-                } else {
-                    // Kalau konsumen yang buka, sembunyikan semua tombol Cetak & Share
-                    actionButtons = riwayatHtml;
-                }
+                
+                let isDeposit = d.total_sisa < 0;
+                let warnaBorder = isDeposit ? "#8AA624" : "#c62828";
+                let displayTotal = isDeposit ? `- Rp ${nf.format(Math.abs(d.total_sisa))}` : `Rp ${nf.format(d.total_sisa)}`;
+                let teksStatus = isDeposit ? 
+                    `<div style="margin-top:4px;"><small style="color:#8AA624; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">account_balance_wallet</span> Deposit / Lebih Bayar</small></div>` :
+                    `<div style="margin-top:4px;"><small style="color:#c62828; font-weight:bold;"><span class="material-symbols-outlined" style="font-size:12px; vertical-align:middle;">warning</span> Ada Tunggakan</small></div>`;
 
                 html += `<div class="rekap-card card-piutang-item" data-nama="${namaKey.toLowerCase()}" style="border-left: 4px solid ${warnaBorder}; margin-bottom: 12px; background: ${isDeposit ? '#f8fdf4' : '#fff'};">
-                      <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="document.getElementById('det_piutang_${safeClass}').classList.toggle('hidden')">
+                      <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="bukaDetailPiutang('${namaKey}', '${safeClass}', ${d.total_sisa})">
                           <div style="flex:1;"><strong style="font-size:14px; display:block;">${namaKey}</strong>${teksStatus}</div>
                           <div style="font-size:16px; font-weight:bold; text-align:right; color: ${isDeposit ? '#8AA624' : '#333'}">${displayTotal}</div>
                       </div>
+                      
                       <div id="det_piutang_${safeClass}" class="hidden" style="margin-top:15px; border-top:1px dashed #DBE4C9; padding-top:10px;">
-                          <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:11px; font-weight:bold;">
-                              <span style="color:#8AA624; cursor:pointer; padding:5px 8px; border:1px solid #8AA624; border-radius:4px;" onclick="toggleSelectSemua('${safeClass}', true)"><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">check_box</span> Pilih Semua</span>
-                              <span style="color:#FEA405; cursor:pointer; padding:5px 8px; border:1px solid #FEA405; border-radius:4px;" onclick="toggleSelectSemua('${safeClass}', false)"><span class="material-symbols-outlined" style="font-size:14px; vertical-align:middle;">check_box_outline_blank</span> Kosongkan</span>
-                          </div>
-                          <div style="max-height: 250px; overflow-y: auto; padding-right:5px; margin-bottom:10px;">${htmlItems}</div>
-                          <div style="display:flex; justify-content:space-between; font-weight:bold; font-size:13px; margin-bottom:10px; border-top:1px solid #DBE4C9; padding-top:10px;">
-                              <span>Total Pilihan:</span><span id="tot_pilihan_${safeClass}" style="color:#8AA624;">Rp ${nf.format(Math.abs(d.total))}</span>
-                          </div>
-                          ${actionButtons}
+                          <div id="loader_det_${safeClass}" style="text-align:center; font-size:11px; color:#FEA405;"><span class="material-symbols-outlined icon-spin" style="font-size:14px; vertical-align:middle;">sync</span> Menarik rincian nota & bayar...</div>
+                          <div id="content_det_${safeClass}" class="hidden"></div>
                       </div>
                   </div>`;
-            }
-            document.getElementById('piutang-list').innerHTML = html || "<div style='text-align:center; padding:20px;'>Tidak ada piutang aktif.</div>";
+            });
+            document.getElementById('piutang-list').innerHTML = html || "<div style='text-align:center; padding:20px;'>Tidak ada piutang/deposit aktif.</div>";
         }
 
         function toggleSelectSemua(safeClass, isSelect) { let checkboxes = document.querySelectorAll(`.chk-inv-${safeClass}`); checkboxes.forEach(cb => { cb.checked = isSelect; }); hitungPreviewSubtotal(safeClass); }
