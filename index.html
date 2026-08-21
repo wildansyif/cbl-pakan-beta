@@ -5331,13 +5331,6 @@ async function prosesAntreanBackground() {
             // 🚀 TEMBAK KE KACAMATA PIUTANG SUPABASE (TANPA BATAS)
             fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?select=*`)
             .then(data => {
-                headers: {
-                    'apikey': SUPA_ANON_KEY,
-                    'Authorization': `Bearer ${SUPA_ANON_KEY}`
-                }
-            })
-            .then(r => r.json())
-            .then(data => {
                 document.getElementById('piutang-loader').classList.add('hidden');
                 let btn = document.getElementById('btn-sync-piutang');
                 if (btn) btn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">sync</span>`;
@@ -8254,10 +8247,6 @@ async function prosesAntreanBackground() {
 
             fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaKonsumen)}&order=tanggal.asc`)
             .then(resData => {
-                headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
-            })
-            .then(r => r.json())
-            .then(resData => {
                 window.isFetchingEStatement = false;
                 window.isEStatementLoaded = true;
 
@@ -8402,10 +8391,7 @@ async function prosesAntreanBackground() {
             btn.innerHTML = '<span class="material-symbols-outlined icon-spin" style="font-size:14px;">sync</span> <span style="font-size:10px; font-weight:bold;">Merakit...</span>';
             btn.style.pointerEvents = 'none';
 
-            fetch(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaKonsumen)}&order=tanggal.asc`, {
-                headers: { 'apikey': SUPA_ANON_KEY, 'Authorization': `Bearer ${SUPA_ANON_KEY}` }
-            })
-            .then(r => r.json())
+            fetchSupabaseAll(`${SUPA_URL}/rest/v1/view_mutasi_piutang_detail?relasi=eq.${encodeURIComponent(namaKonsumen)}&order=tanggal.asc`)
             .then(resData => {
                 if (resData.error) {
                     alert('Gagal mengambil data: ' + resData.message);
