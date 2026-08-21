@@ -5302,9 +5302,9 @@ async function prosesAntreanBackground() {
 
                 data.forEach(d => {
                     let rLower = String(d.relasi).toLowerCase();
-                    // Usir pemakaian internal & golongan sapi dari piutang
-                    if (rLower.includes('kandang') || rLower.includes('spn') || rLower.includes('rph') || rLower.includes('kapalang') || rLower.includes('dewasa') || rLower.includes('jantan') || rLower.includes('pedet') || rLower.includes('kerbau') || rLower.includes('bunting') || rLower.includes('bx') || rLower.includes('domba') || rLower.includes('darbun') || rLower.includes('laktasi')) return;
-
+                    let kelompokSapi = ['bx', 'domba', 'rd', 'rl', 'darbun', 'laktasi', 'kapalang', 'dewasa', 'jantan', 'pedet', 'kerbau', 'bunting'];
+                    if (rLower.includes('kandang') || rLower.includes('spn') || rLower.includes('rph') || rLower.includes('cibulakan') || rLower.includes('pembibitan') || kelompokSapi.includes(rLower)) return;
+                    
                     serverData[d.relasi] = {
                         total_sisa: parseFloat(d.sisa_piutang),
                         isLoaded: false, // Penanda rincian belum disedot
