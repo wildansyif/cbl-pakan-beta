@@ -5480,8 +5480,8 @@ async function prosesAntreanBackground() {
                         if (byr.sisaBayar > 0) ketText += `Sisa DP: Rp ${nf.format(byr.sisaBayar)}<br>`;
                         if (ketText === '') ketText = `<i>Belum digunakan.</i>`;
 
-                        // TOMBOL BUKTI TF DIBANGKITKAN KEMBALI
-                        let linkBukti = (byr.bukti_url && byr.bukti_url.length > 5 && byr.bukti_url !== "-") ? `<a href="${byr.bukti_url}" target="_blank" onclick="event.stopPropagation();" style="margin-left:5px; background:#e3f2fd; padding:3px 8px; border-radius:12px; color:#1565c0; text-decoration:none; display:inline-flex; align-items:center; gap:3px;"><span class="material-symbols-outlined" style="font-size:12px;">receipt_long</span> Bukti TF</a>` : "";
+                        // TOMBOL BUKTI TF DIBANGKITKAN KEMBALI (VERSI SLIM/MINI)
+                        let linkBukti = (byr.bukti_url && byr.bukti_url.length > 5 && byr.bukti_url !== "-") ? `<a href="${byr.bukti_url}" target="_blank" onclick="event.stopPropagation();" style="margin-left:8px; background:#e3f2fd; padding:2px 6px; border-radius:8px; color:#1565c0; text-decoration:none; display:inline-flex; align-items:center; gap:3px; font-size:9px; font-weight:600; line-height:1;"><span class="material-symbols-outlined" style="font-size:11px;">receipt_long</span> Bukti TF</a>` : "";
 
                         riwayatHtml += `<div style="background:#f8fdf4; border:1px solid #DBE4C9; border-radius:6px; padding:8px; margin-bottom:6px; cursor:pointer;" onclick="document.getElementById('det_rw_${safeClass}_${idxRw}').classList.toggle('hidden')">
                           <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:4px;">
