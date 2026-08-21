@@ -1323,10 +1323,12 @@
         }
       /* =========================================
            CSS KHUSUS LOGIN CUSTOM BACKGROUND 
-           (Fix Auto-Hilang, Full Screen & Ramping)
+           (Fix Auto-Hilang, Full Screen & Multi-Device)
            ========================================= */
         .layar-login-custom {
             background-color: #f4f5f0 !important;
+            
+            /* 1. Default (HP) pakai gambar vertikal */
             background-image: url("https://raw.githubusercontent.com/wildansyif/cbl-pakan-beta/main/UI%20Login%20Screen.jpg"); 
             background-position: center bottom !important; 
             background-repeat: no-repeat !important;
@@ -1336,8 +1338,8 @@
             left: 0 !important;
             right: 0 !important;
             bottom: 0 !important;
-            width: 100% !important;
-            height: 100% !important;
+            width: 100vw !important;
+            height: 100vh !important;
             z-index: 99999 !important; 
             
             display: flex;
@@ -1354,32 +1356,42 @@
 
         .login-interactive-area {
             width: 100%;
-            max-width: 250px; /* Kotak Diperkecil & Dirampingkan */
+            max-width: 250px; 
             text-align: center;
             padding: 10px;
             z-index: 2;
         }
 
-        /* Khusus HP: Dorong ke bawah biar nggak nabrak tulisan CBL Connect */
+        /* ============================== */
+        /* PENGATURAN KHUSUS LAYAR HP     */
+        /* ============================== */
         @media (max-width: 768px) {
             .layar-login-custom {
                 background-size: cover !important; 
             }
             .login-interactive-area {
-                margin-top: 25vh !important; /* Ditekan turun ke bawah */
+                margin-top: 25vh !important; /* Dorong ke bawah agar pas */
             }
         }
 
-        /* Khusus Laptop/Desktop */
+        /* ============================== */
+        /* PENGATURAN KHUSUS DESKTOP      */
+        /* ============================== */
         @media (min-width: 769px) {
             .layar-login-custom {
-                background-size: contain !important; 
+                /* 2. Begitu layar melebar, GAMBAR DIGANTI pakai desain Desktop Bapak! */
+                background-image: url("https://github.com/wildansyif/cbl-pakan-beta/blob/d9fa99fcff2b96ac12551d0be7ba9d67398c9f9a/UI%20Login%20Screen%20Desktop.jpg?raw=true") !important;
+                background-size: cover !important; 
+                background-position: center center !important; 
             }
             .login-interactive-area {
-                margin-top: 15vh !important; 
+                margin-top: 15vh !important; /* Posisi di desktop */
             }
         }
 
+        /* ---------------------------------- */
+        /* DESAIN KOTAK PIN (TETAP SAMA)      */
+        /* ---------------------------------- */
         .login-pin-wrapper {
             background: rgba(255, 255, 255, 0.6);
             backdrop-filter: blur(4px);
@@ -1396,9 +1408,9 @@
             width: 100%;
             border: none !important;
             background: transparent !important;
-            font-size: 20px; /* Titik PIN imut */
+            font-size: 20px; 
             text-align: center;
-            letter-spacing: 15px; /* Jarak titik direnggangkan rapi */
+            letter-spacing: 15px; 
             font-weight: bold;
             color: #1e3f20;
             outline: none;
@@ -1416,9 +1428,9 @@
             color: white;
             border: none;
             width: 100%;
-            padding: 12px; /* Tombol dibuat tipis */
+            padding: 12px; 
             border-radius: 30px;
-            font-size: 14px; /* Teks lebih kecil */
+            font-size: 14px; 
             font-weight: bold;
             letter-spacing: 2px;
             cursor: pointer;
