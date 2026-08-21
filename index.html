@@ -4592,7 +4592,7 @@ async function prosesAntreanBackground() {
 
                 // 2. MESIN SMART SWEEP (FIFO)
                 for (let r in rawByRelasi) {
-                    serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: rawByRelasi[r].alamat, dates: {}, riwayat: [] };
+                    serverData[r] = { total: 0, totalSehat: 0, totalTelat: 0, alamat: "-", dates: {}, riwayat: [] };
 
                     let listTagihan = rawByRelasi[r].tagihan.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
                     let listBayar = rawByRelasi[r].bayar.sort((a,b) => new Date(a.tgl) - new Date(b.tgl));
@@ -4998,14 +4998,27 @@ async function prosesAntreanBackground() {
                     let catatanLengkap = String(row.catatan || "").toLowerCase();
                     let cKat = "Penjualan";
 
+                    // 🔥 LOGIKA KATEGORISASI BARU YANG LEBIH CERDAS
                     if (String(row.status).toLowerCase().includes("masuk")) {
                         if (catatanLengkap.includes("gudang") || namaRelasi.includes("mutasi")) cKat = "Mutasi";
                         else cKat = "Masuk";
                     } else {
-                        if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) cKat = "Giling";
-                        else if (String(row.cabang).toLowerCase().includes('kandang') || namaRelasi.includes("kandang")) cKat = "Pemakaian";
-                        else if (namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) cKat = "Mutasi";
-                        else cKat = "Penjualan";
+                        if (namaRelasi.includes("rd") || namaRelasi.includes("rl") || namaRelasi.includes("darbun") || namaRelasi.includes("laktasi")) {
+                            cKat = "Giling";
+                        } 
+                        // Tambahkan semua nama kelompok sapi sebagai "Pemakaian"
+                        else if (String(row.cabang).toLowerCase().includes('kandang') || namaRelasi.includes("kandang") || 
+                                 namaRelasi.includes('kapalang') || namaRelasi.includes('dewasa') || 
+                                 namaRelasi.includes('jantan') || namaRelasi.includes('pedet') || 
+                                 namaRelasi.includes('kerbau') || namaRelasi.includes('bunting')) {
+                            cKat = "Pemakaian";
+                        } 
+                        else if (namaRelasi.includes("rph") || namaRelasi.includes("spn") || namaRelasi.includes("cibulakan") || namaRelasi.includes("pembibitan")) {
+                            cKat = "Mutasi";
+                        } 
+                        else {
+                            cKat = "Penjualan";
+                        }
                     }
 
                     // DIET KETAT: Hanya simpan integer & singkatan untuk hemat text JSON
@@ -5499,29 +5512,31 @@ async function prosesAntreanBackground() {
                     let r = String(row.relasi || "").trim();
                     if (!r || r === "-") return;
 
-                    // 🔥 FILTER SAKTI: Usir relasi internal & non-konsumen dari Menu Piutang!
                     let rLower = r.toLowerCase();
-                    if (rLower.includes('rd') || rLower.includes('rl') || rLower.includes('pembibitan') || 
+                    // FILTER SAKTI: Usir relasi internal, gudang, dan SEMUA nama kelompok sapi dari Piutang!
+                    if (rLower.includes('rd') || rLower.includes('rl') || 
                         rLower.includes('spn') || rLower.includes('rph') || rLower.includes('cibulakan') || 
-                        rLower.includes('kandang')) {
-                        return; // Langsung di-skip, tidak akan digubris oleh mesin Piutang
+                        rLower.includes('kandang') || rLower.includes('kapalang') || rLower.includes('dewasa') || 
+                        rLower.includes('jantan') || rLower.includes('pedet') || rLower.includes('kerbau') || 
+                        rLower.includes('darbun') || rLower.includes('laktasi') || rLower.includes('bunting')) {
+                        return; 
                     }
                     
                     if (!rawByRelasi[r]) {
-                        rawByRelasi[r] = { tagihan: [], bayar: [], alamat: row.alamat || '-' };
+                        rawByRelasi[r] = { tagihan: [], bayar: [] }; // Alamat dibuang dari piutang_cache agar hemat memori
                     }
 
                     let nominal = parseFloat(row.nominal) || parseFloat(row.tagihan) || parseFloat(row.debet) || ((parseFloat(row.qty)||0) * (parseFloat(row.harga_satuan)||0)) || 0;
 
                     if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
-                        // 🔥 TAMBAHAN: Laci 'detailPotongan' untuk menyimpan jejak uang dipakai bayar apa saja
-                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [], bukti_url: row.bukti_url });
+                        // DIET: Buang bukti_url dan array detailPotongan kosong
+                        rawByRelasi[r].bayar.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [] });
                     } else {
+                        // DIET: Hanya simpan info esensial
                         rawByRelasi[r].tagihan.push({
                             tgl: row.tanggal,
                             pakan: row.pakan_kategori || 'Pakan',
                             qty: parseFloat(row.qty) || 0,
-                            satuan: row.satuan || 'Kg',
                             nominal: nominal,
                             terbayar: 0
                         });
