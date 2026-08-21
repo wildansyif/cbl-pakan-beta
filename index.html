@@ -1322,29 +1322,44 @@
             }
         }
        /* =========================================
-           CSS KHUSUS LOGIN CUSTOM BACKGROUND (VERSI RAMPING)
+           CSS KHUSUS LOGIN CUSTOM BACKGROUND 
+           (Fix Auto-Hilang & Full Screen)
            ========================================= */
-        #login-screen {
-            display: flex !important;
+        .layar-login-custom {
+            /* Pasang URL gambar di sini agar permanen dan kebal reset */
+            background-image: url('https://raw.githubusercontent.com/wildansyif/cbl-pakan-beta/main/UI%20Login%20Screen.jpg'); 
+            background-size: cover; 
+            background-position: center bottom; /* Fokus ke area bawah agar sapi selalu terlihat */
+            background-repeat: no-repeat;
+            background-color: #f4f5f0;
+
+            /* Kunci agar dia SELALU full screen tanpa ruang kosong di bawah */
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 99999 !important; /* Kasta tertinggi, menutupi segalanya */
+            
+            display: flex;
             flex-direction: column;
-            justify-content: center !important; 
+            justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            position: relative;
-            z-index: 1;
-            background-color: #f4f5f0 !important;
-            padding: 0 !important;
             margin: 0 !important;
-            max-width: 100% !important; 
+            padding: 0 !important;
+        }
+
+        /* Saat class .hidden ditambahkan oleh JS, layar ini akan BENAR-BENAR HILANG */
+        .layar-login-custom.hidden {
+            display: none !important;
         }
 
         .login-interactive-area {
             width: 100%;
-            max-width: 280px; /* Kotak lebih ramping */
+            max-width: 280px; 
             text-align: center;
             padding: 10px;
-            margin-top: -10vh; /* DITARIK KE ATAS agar pas di area putih */
-            z-index: 2;
+            margin-top: -15vh; /* Tarik ke atas agar tidak menabrak sapi */
         }
 
         .login-pin-wrapper {
@@ -1352,8 +1367,8 @@
             backdrop-filter: blur(4px);
             -webkit-backdrop-filter: blur(4px);
             border: 2px solid #1e3f20; 
-            border-radius: 12px; /* Sudut lebih tajam/elegan */
-            padding: 5px; /* Padding dikurangi */
+            border-radius: 12px; 
+            padding: 5px; 
             margin: 0 auto 15px;
             width: 85%;
             box-shadow: 0 4px 15px rgba(0,0,0,0.05);
@@ -1363,9 +1378,9 @@
             width: 100%;
             border: none !important;
             background: transparent !important;
-            font-size: 28px; /* Titik PIN diperkecil */
+            font-size: 28px; 
             text-align: center;
-            letter-spacing: 12px; /* Jarak titik dirapatkan */
+            letter-spacing: 12px; 
             font-weight: bold;
             color: #1e3f20;
             outline: none;
@@ -1383,9 +1398,9 @@
             color: white;
             border: none;
             width: 100%;
-            padding: 14px; /* Tombol dibuat lebih tipis */
+            padding: 14px; 
             border-radius: 30px;
-            font-size: 15px; /* Teks MASUK diperkecil */
+            font-size: 15px; 
             font-weight: bold;
             letter-spacing: 2px;
             cursor: pointer;
@@ -1400,7 +1415,7 @@
 
         .login-footer {
             margin-top: 25px; 
-            font-size: 10px; /* Teks footer diperkecil */
+            font-size: 10px; 
             color: #444; 
             font-weight: bold;
             letter-spacing: 0.5px;
@@ -1408,18 +1423,6 @@
             padding: 4px 10px;
             border-radius: 20px;
             display: inline-block;
-        }
-
-        /* PERBAIKAN KHUSUS LAYAR LAPTOP (DESKTOP) */
-        @media (min-width: 1024px) {
-            #login-screen {
-                position: fixed !important;
-                top: 0 !important;
-                left: 0 !important;
-                width: 100vw !important;
-                height: 100vh !important;
-                z-index: 9999 !important; /* Menutupi sidebar dengan sempurna */
-            }
         }
     </style>
 </head>
@@ -1429,8 +1432,10 @@
     <!-- ========================================= -->
     <!-- LAYAR LOGIN (CUSTOM BACKGROUND BAPAK)     -->
     <!-- ========================================= -->
-    <div id="login-screen" style="background-image: url('https://raw.githubusercontent.com/wildansyif/cbl-pakan-beta/main/UI%20Login%20Screen.jpg'); background-size: cover; background-position: center center;">
-        
+    <!-- ========================================= -->
+    <!-- LAYAR LOGIN (CUSTOM BACKGROUND)           -->
+    <!-- ========================================= -->
+    <div id="login-screen" class="layar-login-custom">
         <div class="login-interactive-area">
             <!-- Wadah Input PIN (Kaca Transparan) -->
             <div class="login-pin-wrapper">
@@ -1446,7 +1451,6 @@
             <!-- Keterangan Footer Kecil -->
             <div class="login-footer">Aplikasi Internal PT Cita Benggala Lestari</div>
         </div>
-
     </div>
 
     <div id="app-screen" class="hidden">
