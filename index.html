@@ -1321,13 +1321,13 @@
                 background: white !important;
             }
         }
-        /* =========================================
-           CSS KHUSUS LOGIN CUSTOM BACKGROUND
+       /* =========================================
+           CSS KHUSUS LOGIN CUSTOM BACKGROUND (VERSI RAMPING)
            ========================================= */
         #login-screen {
             display: flex !important;
             flex-direction: column;
-            justify-content: center !important; /* Posisikan elemen di tengah secara vertikal */
+            justify-content: center !important; 
             align-items: center;
             min-height: 100vh;
             position: relative;
@@ -1335,30 +1335,27 @@
             background-color: #f4f5f0 !important;
             padding: 0 !important;
             margin: 0 !important;
-            max-width: 100% !important; /* Melepas batasan max-width container lama */
+            max-width: 100% !important; 
         }
 
         .login-interactive-area {
             width: 100%;
-            max-width: 320px;
+            max-width: 280px; /* Kotak lebih ramping */
             text-align: center;
-            padding: 20px;
-            /* Margin atas ini untuk mendorong PIN & Tombol ke area kosong di bawah tulisan CBL Connect. */
-            /* Jika kurang ke bawah/atas, ubah angka 20vh ini (misal 25vh atau 15vh) */
-            margin-top: 20vh; 
+            padding: 10px;
+            margin-top: -10vh; /* DITARIK KE ATAS agar pas di area putih */
             z-index: 2;
         }
 
         .login-pin-wrapper {
-            /* Efek Kaca Transparan (Frosted Glass) */
             background: rgba(255, 255, 255, 0.6);
             backdrop-filter: blur(4px);
             -webkit-backdrop-filter: blur(4px);
-            border: 2px solid #1e3f20; /* Warna hijau gelap CBL */
-            border-radius: 16px;
-            padding: 10px;
-            margin: 0 auto 20px;
-            width: 80%;
+            border: 2px solid #1e3f20; 
+            border-radius: 12px; /* Sudut lebih tajam/elegan */
+            padding: 5px; /* Padding dikurangi */
+            margin: 0 auto 15px;
+            width: 85%;
             box-shadow: 0 4px 15px rgba(0,0,0,0.05);
         }
 
@@ -1366,31 +1363,31 @@
             width: 100%;
             border: none !important;
             background: transparent !important;
-            font-size: 38px;
+            font-size: 28px; /* Titik PIN diperkecil */
             text-align: center;
-            letter-spacing: 18px; /* Jarak antar titik PIN */
+            letter-spacing: 12px; /* Jarak titik dirapatkan */
             font-weight: bold;
             color: #1e3f20;
             outline: none;
-            padding: 10px 0 10px 18px !important; 
+            padding: 8px 0 8px 12px !important; 
         }
 
         .login-pin-input::placeholder {
-            font-size: 30px;
-            letter-spacing: 15px;
+            font-size: 24px;
+            letter-spacing: 12px;
             color: rgba(30, 63, 32, 0.4);
         }
 
         .login-btn {
-            background: #1e3f20; /* Warna hijau gelap CBL */
+            background: #1e3f20; 
             color: white;
             border: none;
             width: 100%;
-            padding: 18px;
-            border-radius: 40px;
-            font-size: 18px;
+            padding: 14px; /* Tombol dibuat lebih tipis */
+            border-radius: 30px;
+            font-size: 15px; /* Teks MASUK diperkecil */
             font-weight: bold;
-            letter-spacing: 3px;
+            letter-spacing: 2px;
             cursor: pointer;
             box-shadow: 0 8px 20px rgba(30, 63, 32, 0.3);
             transition: transform 0.2s;
@@ -1402,15 +1399,27 @@
         }
 
         .login-footer {
-            margin-top: 35px;
-            font-size: 12px;
+            margin-top: 25px; 
+            font-size: 10px; /* Teks footer diperkecil */
             color: #444; 
             font-weight: bold;
             letter-spacing: 0.5px;
-            background: rgba(255, 255, 255, 0.5); /* Latar transparan agar mudah dibaca jika menimpa gambar sapi */
-            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.5); 
+            padding: 4px 10px;
             border-radius: 20px;
             display: inline-block;
+        }
+
+        /* PERBAIKAN KHUSUS LAYAR LAPTOP (DESKTOP) */
+        @media (min-width: 1024px) {
+            #login-screen {
+                position: fixed !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100vw !important;
+                height: 100vh !important;
+                z-index: 9999 !important; /* Menutupi sidebar dengan sempurna */
+            }
         }
     </style>
 </head>
@@ -2872,7 +2881,7 @@
             </div>
         </div>
 
-        <div class="bottom-nav">
+        <div class="bottom-nav hidden" id="main-nav">
             <div class="nav-item active" id="nav-input" onclick="pindahMenu('input')"><span
                     class="material-symbols-outlined nav-icon">edit_document</span><span>Laporan</span></div>
             <div class="nav-item" id="nav-rekap" onclick="pindahMenu('rekap')"><span
@@ -4044,6 +4053,10 @@ async function prosesAntreanBackground() {
                 currentLoggedPin = pin;
                 activeUser = USERS[pin]; document.getElementById('nama-petugas').innerText = activeUser;
                 document.getElementById('login-screen').classList.add('hidden'); document.getElementById('app-screen').classList.remove('hidden');
+                
+                // MUNCULKAN MENU NAVIGASI SAAT LOGIN SUKSES
+                document.getElementById('main-nav').classList.remove('hidden');
+
                 let t = new Date();
                 let blnAktif = t.getMonth() + 1;
                 let thnAktif = t.getFullYear();
