@@ -1323,16 +1323,14 @@
         }
       /* =========================================
            CSS KHUSUS LOGIN CUSTOM BACKGROUND 
-           (Fix Gambar Desktop & HP)
+           (Fix Auto-Hilang, Full Screen & Ramping)
            ========================================= */
         .layar-login-custom {
             background-color: #f4f5f0 !important;
-            /* Perhatikan tanda kutip ganda "" di dalam url() ini penting untuk desktop */
             background-image: url("https://raw.githubusercontent.com/wildansyif/cbl-pakan-beta/main/UI%20Login%20Screen.jpg"); 
             background-position: center bottom !important; 
             background-repeat: no-repeat !important;
             
-            /* Kunci layar penuh, anti-scroll, anti-geser */
             position: fixed !important;
             top: 0 !important;
             left: 0 !important;
@@ -1350,32 +1348,36 @@
             padding: 0 !important;
         }
 
-        /* Khusus HP: Biar Background Sapinya tidak terpotong (Cover -> Contain) */
+        .layar-login-custom.hidden {
+            display: none !important;
+        }
+
+        .login-interactive-area {
+            width: 100%;
+            max-width: 250px; /* Kotak Diperkecil & Dirampingkan */
+            text-align: center;
+            padding: 10px;
+            z-index: 2;
+        }
+
+        /* Khusus HP: Dorong ke bawah biar nggak nabrak tulisan CBL Connect */
         @media (max-width: 768px) {
             .layar-login-custom {
                 background-size: cover !important; 
             }
             .login-interactive-area {
-                margin-top: 15vh !important; /* Dorong ke bawah sedikit di HP agar tidak nabrak teks */
+                margin-top: 25vh !important; /* Ditekan turun ke bawah */
             }
         }
 
-        /* Khusus Laptop/Desktop: Biar Background Proporsional */
+        /* Khusus Laptop/Desktop */
         @media (min-width: 769px) {
             .layar-login-custom {
-                background-size: contain !important; /* Contain agar gambar tidak pecah/terpotong di layar lebar */
+                background-size: contain !important; 
             }
             .login-interactive-area {
-                margin-top: 10vh !important; /* Posisi tengah di Laptop */
+                margin-top: 15vh !important; 
             }
-        }
-
-        .login-interactive-area {
-            width: 100%;
-            max-width: 280px; 
-            text-align: center;
-            padding: 10px;
-            z-index: 2;
         }
 
         .login-pin-wrapper {
@@ -1394,18 +1396,18 @@
             width: 100%;
             border: none !important;
             background: transparent !important;
-            font-size: 28px; 
+            font-size: 20px; /* Titik PIN imut */
             text-align: center;
-            letter-spacing: 12px; 
+            letter-spacing: 15px; /* Jarak titik direnggangkan rapi */
             font-weight: bold;
             color: #1e3f20;
             outline: none;
-            padding: 8px 0 8px 12px !important; 
+            padding: 8px 0 8px 15px !important; 
         }
 
         .login-pin-input::placeholder {
-            font-size: 24px;
-            letter-spacing: 12px;
+            font-size: 20px;
+            letter-spacing: 15px;
             color: rgba(30, 63, 32, 0.4);
         }
 
@@ -1414,9 +1416,9 @@
             color: white;
             border: none;
             width: 100%;
-            padding: 14px; 
+            padding: 12px; /* Tombol dibuat tipis */
             border-radius: 30px;
-            font-size: 15px; 
+            font-size: 14px; /* Teks lebih kecil */
             font-weight: bold;
             letter-spacing: 2px;
             cursor: pointer;
