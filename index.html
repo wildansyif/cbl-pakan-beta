@@ -8460,24 +8460,48 @@ async function prosesAntreanBackground() {
                 // Gabungkan dengan antrean koreksi yang baru saja dibuat di HP (Optimistic UI)
                 let pendingMaster = JSON.parse(localStorage.getItem('pending_master_data') || "[]");
                 let pendingGiling = [];
+                let sisaPendingMaster = []; // Untuk menyimpan sisa data bayangan yang belum masuk server
+
                 pendingMaster.forEach(p => {
                     let relasiRaw = String(p.relasi || "").toUpperCase();
                     let isGilingan = relasiRaw.includes('RD') || relasiRaw.includes('RL') || relasiRaw.includes('DARBUN') || relasiRaw.includes('LAKTASI');
+                    
                     if (isGilingan && p.tgl >= start && p.tgl <= end) {
-                        let tglParts = String(p.tgl).split('-');
-                        let tglStr = tglParts.length === 3 ? `${tglParts[2]}/${tglParts[1]}/${tglParts[0]}` : p.tgl;
                         let relasiClean = (relasiRaw.includes('RD') || relasiRaw.includes('DARBUN')) ? 'RD' : 'RL';
-                        pendingGiling.push({
-                            tglMs: new Date(p.tgl).getTime(),
-                            tglStr: tglStr,
-                            status: p.status || 'Keluar',
-                            relasi: relasiClean,
-                            pakan: p.pakan,
-                            qty: parseFloat(p.qty) || 0,
-                            isPending: true
-                        });
+                        let pQty = parseFloat(p.qty) || 0;
+                        
+                        // CEK SILANG: Apakah data bayangan ini sudah ada di serverData?
+                        let sudahDiServer = serverData.find(s => 
+                            s.tglMs === new Date(p.tgl).getTime() && 
+                            s.relasi === relasiClean && 
+                            s.pakan === p.pakan && 
+                            s.qty === pQty
+                        );
+
+                        if (!sudahDiServer) {
+                            // Jika belum ada di server (karena offline/delay), tetap tampilkan sebagai bayangan
+                            let tglParts = String(p.tgl).split('-');
+                            let tglStr = tglParts.length === 3 ? `${tglParts[2]}/${tglParts[1]}/${tglParts[0]}` : p.tgl;
+                            
+                            pendingGiling.push({
+                                tglMs: new Date(p.tgl).getTime(),
+                                tglStr: tglStr,
+                                status: p.status || 'Keluar',
+                                relasi: relasiClean,
+                                pakan: p.pakan,
+                                qty: pQty,
+                                isPending: true
+                            });
+                            sisaPendingMaster.push(p); // Pertahankan di memori HP
+                        }
+                    } else {
+                        // Data bukan gilingan, biarkan tetap hidup di memori HP
+                        sisaPendingMaster.push(p);
                     }
                 });
+
+                // Hapus data bayangan yang sudah sinkron dari memori HP selamanya
+                localStorage.setItem('pending_master_data', JSON.stringify(sisaPendingMaster));
 
                 globalGilingData = [...serverData, ...pendingGiling];
                 localStorage.setItem(cacheKey, JSON.stringify(globalGilingData));
