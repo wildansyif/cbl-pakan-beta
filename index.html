@@ -6307,8 +6307,16 @@ async function prosesAntreanBackground() {
         });
 
         if (res.ok) {
-            status.innerText = "✅ Berhasil masuk Brankas Supabase!";
+            status.innerText = "Berhasil masuk Brankas Database!";
             status.style.color = "#8AA624";
+            
+            // --- MAINKAN SUARA NOTIFIKASI DI SINI ---
+            try {
+                let notifSound = new Audio('notifdatamasuk.mp3');
+                notifSound.play().catch(e => console.log("Browser memblokir suara otomatis"));
+            } catch (err) { }
+            // ---------------------------------------
+
             document.getElementById('cf_relasi').value = "";
             document.getElementById('cf_nominal').value = "";
             document.getElementById('cf_diskon').value = "";
