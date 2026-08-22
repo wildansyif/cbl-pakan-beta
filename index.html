@@ -5574,13 +5574,24 @@ async function prosesAntreanBackground() {
                         actionButtons += `
                         ${riwayatHtml}
                         <div style="display:flex; gap:10px;">
-                            <button class="btn-submit" onclick="siapkanInvoice('${namaRelasi.replace(/'/g, "\\'")}')" style="margin-top:5px; font-size:13px; padding:10px; background:#8AA624; flex:3;"><span class="material-symbols-outlined" style="font-size:16px;">print</span> Cetak Invoice</button>
+                            <button class="btn-submit" onclick="siapkanInvoice('${namaRelasi.replace(/'/g, "\\'")}')" style="margin-top:5px; font-size:13px; padding:10px; background:#8AA624; flex:1;"><span class="material-symbols-outlined" style="font-size:16px;">print</span> Cetak Invoice</button>
+                        </div>
+                        <div style="display:flex; gap:10px; margin-top:5px;">
+                            <button class="btn-submit" onclick="prosesReminderWA('${namaRelasi.replace(/'/g, "\\'")}')" style="margin-top:0; font-size:11px; padding:8px; background:#FEA405; flex:1;"><span class="material-symbols-outlined" style="font-size:14px;">notifications_active</span> Reminder WA</button>
+                            <button class="btn-submit" onclick="bagikanLinkPortal('${namaRelasi.replace(/'/g, "\\'")}')" style="margin-top:0; font-size:11px; padding:8px; background:#4A90E2; flex:1;"><span class="material-symbols-outlined" style="font-size:14px;">link</span> Link Portal</button>
                         </div>`;
                     } else { actionButtons += riwayatHtml; }
                 } else {
                     actionButtons = `
                     ${riwayatHtml}
                     <div style="text-align:center; padding:15px; background:#f8fdf4; border:1px dashed #8AA624; border-radius:8px; color:#8AA624; font-weight:bold;">Konsumen ini sedang tidak memiliki tunggakan (Lunas/Deposit).</div>`;
+                    
+                    if (!window.isCustomerPortal) {
+                        actionButtons += `
+                        <div style="display:flex; justify-content:center; margin-top:10px;">
+                            <button class="btn-submit" onclick="bagikanLinkPortal('${namaRelasi.replace(/'/g, "\\'")}')" style="margin-top:0; font-size:11px; padding:8px; background:#4A90E2; width:auto;"><span class="material-symbols-outlined" style="font-size:14px;">link</span> Bagikan Link Portal Konsumen</button>
+                        </div>`;
+                    }
                 }
 
                 content.innerHTML = actionButtons;
@@ -7521,23 +7532,30 @@ async function prosesAntreanBackground() {
                     if (row.jenis_mutasi === "Pembayaran" || String(row.pakan_kategori).toLowerCase().includes("bayar")) {
                         bayarArr.push({ tgl: row.tanggal, nominal: nominal, sisaBayar: nominal, detailPotongan: [] });
                     } else {
-                        let qty = parseFloat(row.qty) || 0;
-                        totalQty += qty;
                         let pakan = row.pakan_kategori || 'Pakan';
-                        produkGroup[pakan] = (produkGroup[pakan] || 0) + qty;
+                        let isSisaPiutang = pakan.toLowerCase().includes("sisa piutang");
+                        
+                        // SULAP: Nol-kan Qty agar tidak merusak Top Pakan
+                        let qty = isSisaPiutang ? 0 : (parseFloat(row.qty) || 0);
+                        
+                        if (!isSisaPiutang) {
+                            totalQty += qty;
+                            produkGroup[pakan] = (produkGroup[pakan] || 0) + qty;
 
-                        let blnKey = row.tanggal.substring(0, 7); 
-                        if (!chartGroup[blnKey]) chartGroup[blnKey] = { o: 0, q: 0 };
-                        chartGroup[blnKey].o += nominal;
-                        chartGroup[blnKey].q += qty;
+                            let blnKey = row.tanggal.substring(0, 7); 
+                            if (!chartGroup[blnKey]) chartGroup[blnKey] = { o: 0, q: 0 };
+                            chartGroup[blnKey].o += nominal;
+                            chartGroup[blnKey].q += qty;
 
-                        if (lastTgl) {
-                            let diffDays = (tglObj - lastTgl) / (1000 * 60 * 60 * 24);
-                            if (diffDays > 0) { totalHariSiklus += diffDays; hitunganSiklus++; }
+                            if (lastTgl) {
+                                let diffDays = (tglObj - lastTgl) / (1000 * 60 * 60 * 24);
+                                if (diffDays > 0) { totalHariSiklus += diffDays; hitunganSiklus++; }
+                            }
+                            lastTgl = tglObj;
                         }
-                        lastTgl = tglObj;
 
-                        tagihanArr.push({ tgl: row.tanggal, pakan: pakan, qty: qty, satuan: row.satuan || 'Kg', nominal: nominal, terbayar: 0 });
+                        // Tetap masukkan ke daftar tagihan (dengan qty 0) agar E-Statement piutangnya tetap valid!
+                        tagihanArr.push({ tgl: row.tanggal, pakan: pakan, qty: qty, satuan: row.satuan || '-', nominal: nominal, terbayar: 0 });
                     }
                 });
 
@@ -7646,10 +7664,15 @@ async function prosesAntreanBackground() {
                     chartQty.push(chartGroup[b].q);
                 });
 
+                // POTONG GRAFIK MENJADI 6 BULAN TERAKHIR SAJA!
+                chartLabels = chartLabels.slice(-6);
+                chartOmzet = chartOmzet.slice(-6);
+                chartQty = chartQty.slice(-6);
+
                 let finalData = {
                     profil: profilText, qty: totalQty, siklus: siklusStr, keuangan: keuangan, piutangAktif: piutangAktif, riwayatBayar: riwayatBayar, rankingProduk: rankingProduk, chart: { labels: chartLabels, data: chartOmzet, qty: chartQty }
                 };
-
+                
                 localStorage.setItem(cacheKey, JSON.stringify(finalData));
                 renderAnalisaData(finalData);
 
