@@ -1452,17 +1452,76 @@
             border-radius: 20px;
             display: inline-block;
         }
+
+        /* =========================================
+           CSS SUB-MENU REKAP (POP-UP)
+           ========================================= */
+        .nav-submenu {
+            position: fixed;
+            bottom: calc(70px + env(safe-area-inset-bottom));
+            /* Menyesuaikan jarak kiri untuk HP agar presisi di atas tombol Rekap */
+            left: max(15px, calc(15%)); 
+            background: white;
+            border: 1px solid #DBE4C9;
+            border-radius: 12px;
+            box-shadow: 0 -5px 25px rgba(138, 166, 36, 0.2);
+            display: flex;
+            flex-direction: column;
+            padding: 8px;
+            gap: 5px;
+            transform: translateY(20px) scale(0.95);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            z-index: 999;
+            transform-origin: bottom left;
+        }
+
+        .nav-submenu.show {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .submenu-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 20px;
+            background: #f4f7f0;
+            border-radius: 8px;
+            color: #1a5c40;
+            font-weight: bold;
+            font-size: 13px;
+            cursor: pointer;
+            transition: 0.2s;
+            white-space: nowrap;
+        }
+
+        .submenu-item:active {
+            background: #DBE4C9;
+            transform: scale(0.98);
+        }
+
+        /* Penyesuaian Jika Dibuka di PC/Laptop */
+        @media (min-width: 1024px) {
+            .nav-submenu {
+                bottom: auto;
+                top: 200px;
+                left: 110px;
+                transform: translateX(-20px) scale(0.95);
+                transform-origin: top left;
+                box-shadow: 5px 5px 25px rgba(138, 166, 36, 0.15);
+            }
+            .nav-submenu.show {
+                transform: translateX(0) scale(1);
+            }
+        }
     </style>
 </head>
 
 <body>
 
-    <!-- ========================================= -->
-    <!-- LAYAR LOGIN (CUSTOM BACKGROUND BAPAK)     -->
-    <!-- ========================================= -->
-    <!-- ========================================= -->
-    <!-- LAYAR LOGIN (CUSTOM BACKGROUND)           -->
-    <!-- ========================================= -->
     <div id="login-screen" class="layar-login-custom">
         <div class="login-interactive-area">
             <!-- Wadah Input PIN (Kaca Transparan) -->
@@ -2908,21 +2967,35 @@
         </div>
 
         <div class="bottom-nav hidden" id="main-nav">
-            <div class="nav-item active" id="nav-input" onclick="pindahMenu('input')"><span
-                    class="material-symbols-outlined nav-icon">edit_document</span><span>Laporan</span></div>
-            <div class="nav-item" id="nav-rekap" onclick="pindahMenu('rekap')"><span
-                    class="material-symbols-outlined nav-icon">space_dashboard</span><span>Rekap</span></div>
-            <div class="nav-item" id="nav-analytics" onclick="pindahMenu('analytics')"><span
-                    class="material-symbols-outlined nav-icon">analytics</span><span>Analisa</span></div>
-            <div class="nav-item hidden" id="nav-giling" onclick="pindahMenu('giling')"><span
-                    class="material-symbols-outlined nav-icon">manufacturing</span><span>Giling</span></div>
-            <div class="nav-item" id="nav-stok" onclick="pindahMenu('stok')"><span
-                    class="material-symbols-outlined nav-icon">inventory_2</span><span>Stok</span></div>
-            <div class="nav-item" id="nav-piutang" onclick="pindahMenu('piutang')"><span
-                    class="material-symbols-outlined nav-icon">receipt_long</span><span>Piutang</span></div>
+            <div class="nav-item active" id="nav-input" onclick="pindahMenu('input')">
+                <span class="material-symbols-outlined nav-icon">edit_document</span><span>Laporan</span>
+            </div>
+            
+            <!-- TOMBOL GABUNGAN REKAP -->
+            <div class="nav-item" id="nav-rekap-group" onclick="toggleSubMenu(event)">
+                <span class="material-symbols-outlined nav-icon">space_dashboard</span><span>Rekap</span>
+            </div>
+            
+            <div class="nav-item" id="nav-analytics" onclick="pindahMenu('analytics')">
+                <span class="material-symbols-outlined nav-icon">analytics</span><span>Analisa</span>
+            </div>
+            <div class="nav-item" id="nav-stok" onclick="pindahMenu('stok')">
+                <span class="material-symbols-outlined nav-icon">inventory_2</span><span>Stok</span>
+            </div>
+            <div class="nav-item" id="nav-piutang" onclick="pindahMenu('piutang')">
+                <span class="material-symbols-outlined nav-icon">receipt_long</span><span>Piutang</span>
+            </div>
         </div>
 
-    </div>
+        <!-- WADAH POP-UP SUB-MENU -->
+        <div id="submenu-rekap" class="nav-submenu">
+            <div id="sub-rekap-harian" class="submenu-item" onclick="pindahMenu('rekap')">
+                <span class="material-symbols-outlined" style="color:#8AA624;">fact_check</span> Rekap Harian
+            </div>
+            <div id="sub-rekap-giling" class="submenu-item" onclick="pindahMenu('giling')">
+                <span class="material-symbols-outlined" style="color:#FEA405;">manufacturing</span> Rekap Giling
+            </div>
+        </div>
 
     <div id="custom-keyboard">
         <div class="key-row"><button class="key-btn" onclick="ketikKeyboard('1')">1</button><button class="key-btn"
@@ -3118,6 +3191,8 @@
                 page-break-inside: avoid !important;
                 break-inside: avoid !important;
             }
+
+            
         </style>
 
         <div id="estatement-content"
@@ -4111,33 +4186,36 @@ async function prosesAntreanBackground() {
                 // ==========================================
 
                 // 1. Gembok semua menu khusus terlebih dahulu
-                document.getElementById('nav-rekap').classList.add('hidden');
+                document.getElementById('nav-rekap-group').classList.add('hidden');
                 document.getElementById('nav-analytics').classList.add('hidden');
-                document.getElementById('nav-giling').classList.add('hidden');
                 document.getElementById('nav-piutang').classList.add('hidden');
-
-                // (nav-input/Laporan dan nav-stok otomatis nyala sebagai menu dasar)
+                document.getElementById('sub-rekap-harian').classList.add('hidden');
+                document.getElementById('sub-rekap-giling').classList.add('hidden');
 
                 // 2. Buka gembok sesuai PIN
                 if (currentLoggedPin === "1234") {
                     // Admin Pusat (Wildan): Full Access
-                    document.getElementById('nav-rekap').classList.remove('hidden');
+                    document.getElementById('nav-rekap-group').classList.remove('hidden');
+                    document.getElementById('sub-rekap-harian').classList.remove('hidden');
+                    document.getElementById('sub-rekap-giling').classList.remove('hidden');
+                    
                     document.getElementById('nav-analytics').classList.remove('hidden');
-                    document.getElementById('nav-giling').classList.remove('hidden');
                     document.getElementById('nav-piutang').classList.remove('hidden');
                 }
                 else if (currentLoggedPin === "0000") {
-                    // PAK AGUS: Laporan, Rekap, Stok
-                    document.getElementById('nav-rekap').classList.remove('hidden');
+                    // PAK AGUS: Hanya Rekap Harian
+                    document.getElementById('nav-rekap-group').classList.remove('hidden');
+                    document.getElementById('sub-rekap-harian').classList.remove('hidden');
                 }
                 else if (currentLoggedPin === "8888") {
-                    // Petugas SPN (Zulfi): Laporan, Giling, Stok
-                    document.getElementById('nav-giling').classList.remove('hidden');
+                    // Petugas SPN (Zulfi): Hanya Rekap Giling
+                    document.getElementById('nav-rekap-group').classList.remove('hidden');
+                    document.getElementById('sub-rekap-giling').classList.remove('hidden');
                 }
                 else {
-                    // PETUGAS LAPANGAN LAINNYA (Misal PIN 5678)
-                    // Default disamakan dengan Pak Agus (Laporan, Rekap, Stok)
-                    document.getElementById('nav-rekap').classList.remove('hidden');
+                    // PETUGAS LAPANGAN LAINNYA
+                    document.getElementById('nav-rekap-group').classList.remove('hidden');
+                    document.getElementById('sub-rekap-harian').classList.remove('hidden');
                 }
 
                 updateStatusKoneksi(); gantiLokasi();
@@ -4172,6 +4250,19 @@ async function prosesAntreanBackground() {
                 tarikDataGiling(true);
             }
         }
+        // Fungsi Buka Tutup Sub-Menu Rekap
+        function toggleSubMenu(e) {
+            e.stopPropagation(); // Mencegah klik bocor ke background
+            document.getElementById('submenu-rekap').classList.toggle('show');
+        }
+
+        // Kalau user klik sembarang tempat di layar, Sub-Menu otomatis tertutup
+        document.addEventListener('click', function(e) {
+            let submenu = document.getElementById('submenu-rekap');
+            if (submenu.classList.contains('show') && !e.target.closest('#nav-rekap-group')) {
+                submenu.classList.remove('show');
+            }
+        });
 
         function toggleModeInput() {
             let mode = document.querySelector('input[name="mode_input"]:checked').value;
