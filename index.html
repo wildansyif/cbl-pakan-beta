@@ -4810,11 +4810,12 @@ async function prosesAntreanBackground() {
                 if (!Array.isArray(masterData)) throw new Error(masterData.message || "Gagal memuat transaksi pakan");
                 if (!Array.isArray(cfData)) throw new Error(cfData.message || "Gagal memuat cashflow");
 
-                // 1. TERJEMAHKAN TRANSAKSI PAKAN
+               // 1. TERJEMAHKAN TRANSAKSI PAKAN
                 let rawMaster = masterData.map(row => {
                     let tglObj = new Date(row.tanggal);
                     let namaRelasi = String(row.relasi).toLowerCase();
                     let catatanLengkap = String(row.catatan || "").toLowerCase();
+                    let cabangLower = String(row.cabang).toLowerCase();
                     let cKat = "Penjualan";
 
                     let kelompokSapi = ['bx', 'domba', 'rd', 'rl', 'darbun', 'laktasi', 'kapalang', 'dewasa', 'jantan', 'pedet', 'kerbau', 'bunting'];
