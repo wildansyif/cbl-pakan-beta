@@ -5304,10 +5304,11 @@ async function prosesAntreanBackground() {
                     let kelompokSapi = ['bx', 'domba', 'rd', 'rl', 'darbun', 'laktasi', 'kapalang', 'dewasa', 'jantan', 'pedet', 'kerbau', 'bunting'];
                     if (rLower.includes('kandang') || rLower.includes('spn') || rLower.includes('rph') || rLower.includes('cibulakan') || rLower.includes('pembibitan') || kelompokSapi.includes(rLower)) return;
 
-                    serverData[d.relasi] = {
+                   serverData[d.relasi] = {
                         total_sisa: parseFloat(d.sisa_piutang),
                         total_telat: parseFloat(d.piutang_telat),
                         total_sehat: parseFloat(d.piutang_sehat),
+                        alamat: d.alamat || "-",
                         isLoaded: false,
                         dates: {},
                         riwayat: []
