@@ -3916,7 +3916,12 @@ async function prosesAntreanBackground() {
             // ===============================================
             let urlSJ = "-";
             if (pl.fileSJ && pl.fileSJ.base64) {
-                badge.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:16px; vertical-align:middle;">sync</span> Upload Surat Jalan...`;
+                // Deteksi otomatis: Apakah ini transaksi Giling SPN?
+                let isGilingan = (pl.status === 'Keluar' && pl.lokasi === '/spn');
+                let namaTeksUI = isGilingan ? "Catatan Giling" : "Surat Jalan";
+                
+                badge.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:16px; vertical-align:middle;">sync</span> Upload ${namaTeksUI}...`;
+                
                 let dSJ = pl.tanggal ? new Date(pl.tanggal) : new Date();
                 let tglSJ = ("0" + dSJ.getDate()).slice(-2) + "-" + ("0" + (dSJ.getMonth() + 1)).slice(-2) + "-" + dSJ.getFullYear();
                 
@@ -3927,14 +3932,18 @@ async function prosesAntreanBackground() {
                 }
                 let strPakan = arrPakan.join('-');
                 
-                let rawNamaSJ = `SJ ${cabangStr}-${tglSJ}-${strPakan}`;
+                // Prefix nama dokumen dan folder tujuan yang cerdas
+                let prefixDoc = isGilingan ? 'GILING' : 'SJ';
+                let targetFolder = isGilingan ? 'bukti_giling' : 'surat_jalan';
+                
+                let rawNamaSJ = `${prefixDoc} ${cabangStr}-${tglSJ}-${strPakan}`;
                 // Bersihkan karakter ilegal (seperti koma/titik/slash) agar aman di Supabase
                 let namaFile = rawNamaSJ.replace(/[^a-zA-Z0-9 \-]/g, '_') + '.jpg';
                 try {
-                    urlSJ = await uploadGambarKeSupabase(pl.fileSJ.base64, pl.fileSJ.mime, 'surat_jalan', namaFile);
+                    urlSJ = await uploadGambarKeSupabase(pl.fileSJ.base64, pl.fileSJ.mime, targetFolder, namaFile);
                 } catch (err) {
-                    console.error("Gagal upload SJ", err);
-                    urlSJ = "Gagal Upload SJ";
+                    console.error(`Gagal upload ${namaTeksUI}`, err);
+                    urlSJ = `Gagal Upload ${prefixDoc}`;
                 }
                 badge.innerHTML = `<span class="material-symbols-outlined icon-spin" style="font-size:16px; vertical-align:middle;">sync</span> Menyimpan Data...`;
             }
@@ -6392,7 +6401,7 @@ async function prosesAntreanBackground() {
                 catatan: document.getElementById('catatan').value,
                 items: {},
                 detail_items: {},
-                fileSJ: (statusPilihan === 'Masuk' && fileBase64_SJ) ? { base64: fileBase64_SJ, mime: fileMime_SJ } : null,
+                fileSJ: ((statusPilihan === 'Masuk' || (statusPilihan === 'Keluar' && lokasiTerpilih === '/spn')) && fileBase64_SJ) ? { base64: fileBase64_SJ, mime: fileMime_SJ } : null,
                 isPending: true,
                 uangBongkar: document.getElementById('uangBongkar') ? document.getElementById('uangBongkar').checked : false
             };
